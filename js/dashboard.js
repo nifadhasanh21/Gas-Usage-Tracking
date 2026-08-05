@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initial Data Fetch
     refreshDashboard();
 
-    // Supabase Single Realtime Listener (UI Sync + Notification)
+    // Supabase Single Realtime Listener
     setupRealtimeSync();
 
     // Event Listeners
@@ -49,7 +49,7 @@ function sendGasNotification(title, body) {
 }
 
 // ==========================================
-// Realtime Database Subscription (No Refresh Fix)
+// Realtime Database Subscription
 // ==========================================
 function setupRealtimeSync() {
     _supabase
@@ -59,18 +59,14 @@ function setupRealtimeSync() {
             { event: '*', schema: 'public', table: 'burner_sessions' },
             (payload) => {
                 console.log('Realtime DB Change Received:', payload);
-
-                // ১. রিফ্রেশ ছাড়া সাথে সাথে UI আপডেট করবে
                 refreshDashboard();
 
-                // ২. নতুন সেশন চালু হলে নোটিফিকেশন
                 if (payload.eventType === 'INSERT') {
                     sendGasNotification(
                         '🔥 Stove Turned ON!',
                         `New cooking session started on ${payload.new.burner_count || 1} burner(s).`
                     );
                 } 
-                // ৩. সেশন বন্ধ হলে নোটিফিকেশন
                 else if (payload.eventType === 'UPDATE' && payload.new.status === 'completed') {
                     sendGasNotification(
                         '✅ Stove Turned OFF!',
@@ -79,9 +75,15 @@ function setupRealtimeSync() {
                 }
             }
         )
-        .subscribe((status) => {
-            console.log('Supabase Realtime Status:', status);
-        });
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'app_settings' },
+            () => {
+                // এডমিন বিলের দাম বদলালে ড্যাশবোর্ডের হিসাব সাথে সাথে আপডেট হবে
+                fetchDateWiseUsageAndCost();
+            }
+        )
+        .subscribe();
 }
 
 // ==========================================
@@ -161,14 +163,22 @@ async function fetchDateWiseUsageAndCost() {
     const container = document.getElementById('dateWiseTablesContainer');
     if (!container) return;
 
+    // ১. লেটেস্ট বিল ও ক্যাপাসিটি রিড
     const { data: setRes } = await _supabase.from('app_settings').select('key, value');
     let cylinderCost = 1450;
     let cylinderCapHours = 80;
 
-    setRes?.forEach(s => {
-        if (s.key === 'cylinder_cost') cylinderCost = parseFloat(s.value);
-        if (s.key === 'cylinder_capacity_hours') cylinderCapHours = parseFloat(s.value);
-    });
+    if (setRes) {
+        setRes.forEach(s => {
+            if (s.key === 'cylinder_cost' && s.value) cylinderCost = parseFloat(s.value);
+            if (s.key === 'cylinder_capacity_hours' && s.value) cylinderCapHours = parseFloat(s.value);
+        });
+    }
+
+    // চলতি মাসের ডাটা ফিল্টারিং (বর্তমান চলতি মাসের ব্যবহার গণনার জন্য)
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
 
     const { data } = await _supabase
         .from('burner_sessions')
@@ -182,7 +192,7 @@ async function fetchDateWiseUsageAndCost() {
     }
 
     const grouped = {};
-    let grandTotalMins = 0;
+    let grandTotalMins = 0; // চলতি মাসের মোট মিনিট
     let totalWeightedHours = 0;
     let userOverallMins = {};
     let chartLabels = [];
@@ -190,9 +200,21 @@ async function fetchDateWiseUsageAndCost() {
     processedReportData = [];
 
     data.forEach(row => {
-        const dateStr = new Date(row.start_time).toLocaleDateString();
+        const logDate = new Date(row.start_time);
+        const dateStr = logDate.toLocaleDateString();
+        
         if (!grouped[dateStr]) grouped[dateStr] = [];
         grouped[dateStr].push(row);
+
+        // কেবল চলতি মাসের মিনিটের সাথে এড হবে (পুরানো মাসের হিসাব আলাদা থাকবে)
+        if (logDate.getMonth() === currentMonth && logDate.getFullYear() === currentYear) {
+            const mins = parseInt(row.duration_minutes || 0);
+            const name = row.profiles?.full_name || 'User';
+
+            if (!userOverallMins[name]) userOverallMins[name] = 0;
+            userOverallMins[name] += mins;
+            grandTotalMins += mins;
+        }
     });
 
     let html = '';
@@ -221,9 +243,6 @@ async function fetchDateWiseUsageAndCost() {
         dayLogs.forEach(item => {
             const name = item.profiles?.full_name || 'User';
             const mins = parseInt(item.duration_minutes || 0);
-
-            if (!userOverallMins[name]) userOverallMins[name] = 0;
-            userOverallMins[name] += mins;
 
             dayMins += mins;
             totalWeightedHours += parseFloat(item.weighted_hours || 0);
@@ -258,7 +277,6 @@ async function fetchDateWiseUsageAndCost() {
             </div>
         `;
 
-        grandTotalMins += dayMins;
         chartLabels.unshift(dateStr);
         chartData.unshift(dayMins);
     }
@@ -272,18 +290,23 @@ async function fetchDateWiseUsageAndCost() {
     if (pctTextElem) pctTextElem.innerText = `${remainingPct}%`;
     if (barElem) barElem.style.width = `${remainingPct}%`;
 
-    // Cost Splitter
-    let costBreakdownHtml = Object.keys(userOverallMins).map(name => {
-        const userMins = userOverallMins[name];
-        const percentage = grandTotalMins > 0 ? (userMins / grandTotalMins) : 0;
-        const userCost = (percentage * cylinderCost).toFixed(2);
-        return `<p style="margin-bottom: 6px;"><strong>${name}</strong>: ${userMins} Mins ➔ Estimated Bill: <strong>${userCost} BDT</strong></p>`;
-    }).join('');
+    // Dynamic Monthly Cost Splitter
+    let costBreakdownHtml = '';
+    if (Object.keys(userOverallMins).length === 0) {
+        costBreakdownHtml = `<p>No cooking logs for the current month yet.</p>`;
+    } else {
+        costBreakdownHtml = Object.keys(userOverallMins).map(name => {
+            const userMins = userOverallMins[name];
+            const percentage = grandTotalMins > 0 ? (userMins / grandTotalMins) : 0;
+            const userCost = (percentage * cylinderCost).toFixed(2);
+            return `<p style="margin-bottom: 6px;"><strong>${name}</strong>: ${userMins} Mins ➔ Estimated Bill: <strong>${userCost} BDT</strong></p>`;
+        }).join('');
+    }
 
     html += `
         <div class="grand-total-box">
-            <h4>Monthly Gas Bill Splitter (Cylinder: ${cylinderCost} BDT)</h4>
-            <p class="mb-4">Total Mess Gas Duration: <strong>${grandTotalMins} Minutes</strong></p>
+            <h4>Current Month Bill Splitter (Cylinder: ${cylinderCost} BDT)</h4>
+            <p class="mb-4">Current Month Total Gas Use: <strong>${grandTotalMins} Minutes</strong></p>
             <div>${costBreakdownHtml}</div>
         </div>
     `;
@@ -326,7 +349,7 @@ function renderAnalyticsChart(labels, data) {
     });
 }
 
-// Clean Styled PDF Generation with jsPDF-AutoTable
+// Clean Styled PDF Generation
 function generateCleanPDFReport() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();

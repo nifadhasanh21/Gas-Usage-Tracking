@@ -1,62 +1,132 @@
 document.addEventListener('DOMContentLoaded', () => {
     fetchLogs();
-    document.getElementById('billForm')?.addEventListener('submit', runBillCalculation);
+    
+    // ফর্ম সাবমিট ইভেন্ট হ্যান্ডলার
+    const billForm = document.getElementById('billForm');
+    if (billForm) {
+        billForm.addEventListener('submit', runBillCalculation);
+    }
 });
 
+// ==========================================
+// Fetch Master Cooking Logs
+// ==========================================
 async function fetchLogs() {
     const tbody = document.getElementById('masterLogsBody');
     if (!tbody) return;
 
-    const { data } = await _supabase
+    const { data, error } = await _supabase
         .from('burner_sessions')
         .select('*, profiles(full_name)')
         .order('id', { ascending: false });
 
-    if (!data) return;
+    if (error) {
+        console.error("Error fetching logs:", error.message);
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">No cooking logs found.</td></tr>`;
+        return;
+    }
 
     tbody.innerHTML = data.map(log => `
         <tr>
-            <td>${log.profiles?.full_name || 'N/A'}</td>
+            <td><strong>${log.profiles?.full_name || 'N/A'}</strong></td>
             <td>${log.burner_count} Burner</td>
-            <td>${new Date(log.start_time).toLocaleTimeString()}</td>
-            <td>${log.end_time ? new Date(log.end_time).toLocaleTimeString() : 'Running'}</td>
-            <td>${log.status}</td>
+            <td>${new Date(log.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+            <td>${log.end_time ? new Date(log.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '<span style="color:orange;">Running</span>'}</td>
+            <td><span class="badge">${log.status}</span></td>
             <td>
-                <button class="btn btn-danger" style="padding:4px 8px;" onclick="removeLog(${log.id})"><i class="fa-solid fa-trash"></i></button>
+                <button class="btn btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="removeLog(${log.id})">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
             </td>
         </tr>
     `).join('');
 }
 
+// ==========================================
+// Delete Cooking Log Permanently
+// ==========================================
 async function removeLog(id) {
     if (confirm('Delete log permanently?')) {
-        await _supabase.from('burner_sessions').delete().eq('id', id);
-        fetchLogs();
+        const { error } = await _supabase.from('burner_sessions').delete().eq('id', id);
+        if (error) {
+            alert('Failed to delete log: ' + error.message);
+        } else {
+            fetchLogs();
+            if (typeof refreshDashboard === 'function') refreshDashboard();
+        }
     }
 }
 
+// ==========================================
+// Save Cylinder Bill & Run Dynamic Splitter
+// ==========================================
 async function runBillCalculation(e) {
     e.preventDefault();
-    const totalAmount = parseFloat(document.getElementById('totalBillInput').value);
+    
+    const billInput = document.getElementById('totalBillInput');
+    const totalAmount = parseFloat(billInput.value);
 
-    const { data } = await _supabase
+    if (isNaN(totalAmount) || totalAmount <= 0) {
+        alert("Please enter a valid bill amount!");
+        return;
+    }
+
+    // ১. নতুন টাকা Supabase-এর app_settings টেবিলে আপডেট করবে
+    const { error: setErr } = await _supabase
+        .from('app_settings')
+        .upsert({ key: 'cylinder_cost', value: totalAmount.toString() }, { onConflict: 'key' });
+
+    if (setErr) {
+        console.error("Error updating settings:", setErr.message);
+        alert("Database update failed! Check permissions.");
+        return;
+    }
+
+    // ২. শুধুমাত্র চলতি মাসের রান্না সেশনের ডাটা ফেচ করবে
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    const { data, error } = await _supabase
         .from('burner_sessions')
-        .select('weighted_hours, profiles(full_name)')
+        .select('start_time, weighted_hours, profiles(full_name)')
         .eq('status', 'completed');
+
+    if (error) {
+        alert("Failed to fetch sessions: " + error.message);
+        return;
+    }
 
     let houseWeightedTotal = 0;
     const totals = {};
 
-    data.forEach(row => {
-        const val = parseFloat(row.weighted_hours || 0);
-        const name = row.profiles?.full_name || 'Unknown';
-        houseWeightedTotal += val;
-        totals[name] = (totals[name] || 0) + val;
+    data?.forEach(row => {
+        const logDate = new Date(row.start_time);
+        
+        // চলতি মাসের ডাটা ফিল্টারিং
+        if (logDate.getMonth() === currentMonth && logDate.getFullYear() === currentYear) {
+            const val = parseFloat(row.weighted_hours || 0);
+            const name = row.profiles?.full_name || 'Unknown';
+            houseWeightedTotal += val;
+            totals[name] = (totals[name] || 0) + val;
+        }
     });
 
     const tbody = document.getElementById('billResultsBody');
-    document.getElementById('billResultsContainer').classList.remove('hidden');
+    const resultsContainer = document.getElementById('billResultsContainer');
+    if (resultsContainer) resultsContainer.classList.remove('hidden');
 
+    if (houseWeightedTotal === 0 || Object.keys(totals).length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No completed logs for the current month yet.</td></tr>`;
+        alert(`Bill rate (${totalAmount} BDT) saved! But no usage logs were found for this month.`);
+        return;
+    }
+
+    // ৩. UI-তে মেম্বারদের টাকার হিসেব দেখাবে
     tbody.innerHTML = Object.keys(totals).map(name => {
         const userVal = totals[name];
         const ratio = ((userVal / houseWeightedTotal) * 100).toFixed(1);
@@ -67,8 +137,15 @@ async function runBillCalculation(e) {
                 <td><strong>${name}</strong></td>
                 <td>${userVal.toFixed(2)} hrs</td>
                 <td>${ratio}%</td>
-                <td><strong style="color:var(--success);">$${due}</strong></td>
+                <td><strong style="color:var(--success);">${due} BDT</strong></td>
             </tr>
         `;
     }).join('');
+
+    alert(`Successfully updated gas bill to ${totalAmount} BDT! User dashboard updated.`);
+
+    // ড্যাশবোর্ড স্ক্রিন খোলা থাকলে তা অটো-রিফ্রেশ করবে
+    if (typeof refreshDashboard === 'function') {
+        refreshDashboard();
+    }
 }
