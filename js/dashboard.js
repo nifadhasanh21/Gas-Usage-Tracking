@@ -305,3 +305,58 @@ function initQRScanner() {
         box.classList.add('hidden');
     });
 }
+
+//For Notificaation
+
+// ১. ব্রাউজারে নোটিফিকেশন পারমিশন চাওয়া
+async function requestNotificationPermission() {
+    if ('Notification' in window) {
+        if (Notification.permission === 'default') {
+            await Notification.requestPermission();
+        }
+    }
+}
+
+// ২. পুশ নোটিফিকেশন সেন্ড করার ফাংশন
+function sendGasNotification(title, body) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, {
+            body: body,
+            icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png',
+            vibrate: [200, 100, 200]
+        });
+    }
+}
+
+// ৩. Supabase Realtime: কেউ চুলা অন বা অফ করলেই নোটিফিকেশন আসবে
+document.addEventListener('DOMContentLoaded', () => {
+    requestNotificationPermission();
+
+    _supabase
+        .channel('realtime-burner-notifications')
+        .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'burner_sessions' },
+            (payload) => {
+                const session = payload.new;
+                sendGasNotification(
+                    '🔥 Stove Turned ON!',
+                    `Someone started cooking on ${session.burner_count} burner(s).`
+                );
+            }
+        )
+        .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'burner_sessions' },
+            (payload) => {
+                const session = payload.new;
+                if (session.status === 'completed') {
+                    sendGasNotification(
+                        '✅ Stove Turned OFF!',
+                        `Cooking finished. Duration: ${session.duration_minutes || 0} mins.`
+                    );
+                }
+            }
+        )
+        .subscribe();
+});
