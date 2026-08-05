@@ -2,18 +2,25 @@ let chartInstance = null;
 let currentRole = 'user';
 let processedReportData = []; // PDF Export Cache
 
+// Initialize App on DOM Load
 document.addEventListener('DOMContentLoaded', async () => {
     await checkUserRole();
+    await requestNotificationPermission();
+    
+    // Initial Data Fetch
     refreshDashboard();
 
-    _supabase.channel('public:burner_sessions')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'burner_sessions' }, () => refreshDashboard())
-        .subscribe();
+    // Supabase Single Realtime Listener (UI Sync + Notification)
+    setupRealtimeSync();
 
+    // Event Listeners
     document.getElementById('scanQrBtn')?.addEventListener('click', initQRScanner);
     document.getElementById('downloadPdfBtn')?.addEventListener('click', generateCleanPDFReport);
 });
 
+// ==========================================
+// User Authentication & Role Management
+// ==========================================
 async function checkUserRole() {
     const { data: { user } } = await _supabase.auth.getUser();
     if (user) {
@@ -22,6 +29,64 @@ async function checkUserRole() {
     }
 }
 
+// ==========================================
+// Notification Management
+// ==========================================
+async function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission();
+    }
+}
+
+function sendGasNotification(title, body) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, {
+            body: body,
+            icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png',
+            vibrate: [200, 100, 200]
+        });
+    }
+}
+
+// ==========================================
+// Realtime Database Subscription (No Refresh Fix)
+// ==========================================
+function setupRealtimeSync() {
+    _supabase
+        .channel('realtime-burner-changes')
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'burner_sessions' },
+            (payload) => {
+                console.log('Realtime DB Change Received:', payload);
+
+                // ১. রিফ্রেশ ছাড়া সাথে সাথে UI আপডেট করবে
+                refreshDashboard();
+
+                // ২. নতুন সেশন চালু হলে নোটিফিকেশন
+                if (payload.eventType === 'INSERT') {
+                    sendGasNotification(
+                        '🔥 Stove Turned ON!',
+                        `New cooking session started on ${payload.new.burner_count || 1} burner(s).`
+                    );
+                } 
+                // ৩. সেশন বন্ধ হলে নোটিফিকেশন
+                else if (payload.eventType === 'UPDATE' && payload.new.status === 'completed') {
+                    sendGasNotification(
+                        '✅ Stove Turned OFF!',
+                        `Cooking session completed (${payload.new.duration_minutes || 0} mins).`
+                    );
+                }
+            }
+        )
+        .subscribe((status) => {
+            console.log('Supabase Realtime Status:', status);
+        });
+}
+
+// ==========================================
+// Dashboard Logic & Data Fetching
+// ==========================================
 function refreshDashboard() {
     fetchLiveStatusAndQueue();
     fetchDateWiseUsageAndCost();
@@ -40,31 +105,37 @@ async function fetchLiveStatusAndQueue() {
     let usedBurners = 0;
     activeSessions?.forEach(s => usedBurners += s.burner_count);
 
-    grid.innerHTML = `
-        <div class="burner-badge ${usedBurners < 1 ? 'badge-free' : 'badge-busy'}">
-            Burner 1: <strong>${usedBurners < 1 ? 'FREE' : 'BUSY'}</strong>
-        </div>
-        <div class="burner-badge ${usedBurners < 2 ? 'badge-free' : 'badge-busy'}">
-            Burner 2: <strong>${usedBurners < 2 ? 'FREE' : 'BUSY'}</strong>
-        </div>
-    `;
-
-    if (!activeSessions || activeSessions.length === 0) {
-        feed.innerHTML = `<p class="subtitle text-center" style="color:var(--badge-green-text);"><i class="fa-solid fa-circle-check"></i> All burners are currently free.</p>`;
-    } else {
-        feed.innerHTML = activeSessions.map(s => `
-            <div class="input-glass mb-4" style="display:flex; justify-content:space-between; align-items:center;">
-                <span><i class="fa-solid fa-fire"></i> <strong>${s.profiles?.full_name}</strong>: <em>${s.meal_note || 'N/A'}</em> (${s.burner_count} burner)</span>
-                <button onclick="emergencyForceStop(${s.id})" class="btn-ice btn-danger-ice" style="padding: 4px 10px; font-size: 0.75rem;"><i class="fa-solid fa-power-off"></i> Force Stop</button>
+    if (grid) {
+        grid.innerHTML = `
+            <div class="burner-badge ${usedBurners < 1 ? 'badge-free' : 'badge-busy'}">
+                Burner 1: <strong>${usedBurners < 1 ? 'FREE' : 'BUSY'}</strong>
             </div>
-        `).join('');
+            <div class="burner-badge ${usedBurners < 2 ? 'badge-free' : 'badge-busy'}">
+                Burner 2: <strong>${usedBurners < 2 ? 'FREE' : 'BUSY'}</strong>
+            </div>
+        `;
     }
 
-    if (usedBurners >= 2) {
-        const { data: user } = await _supabase.auth.getUser();
-        queueBox.innerHTML = `<button onclick="joinQueue('${user.user?.id}')" class="btn-ice"><i class="fa-solid fa-clock"></i> Both Busy - Join Queue</button>`;
-    } else {
-        queueBox.innerHTML = '';
+    if (feed) {
+        if (!activeSessions || activeSessions.length === 0) {
+            feed.innerHTML = `<p class="subtitle text-center" style="color:var(--badge-green-text);"><i class="fa-solid fa-circle-check"></i> All burners are currently free.</p>`;
+        } else {
+            feed.innerHTML = activeSessions.map(s => `
+                <div class="input-glass mb-4" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span><i class="fa-solid fa-fire"></i> <strong>${s.profiles?.full_name || 'User'}</strong>: <em>${s.meal_note || 'N/A'}</em> (${s.burner_count} burner)</span>
+                    <button onclick="emergencyForceStop(${s.id})" class="btn-ice btn-danger-ice" style="padding: 4px 10px; font-size: 0.75rem;"><i class="fa-solid fa-power-off"></i> Force Stop</button>
+                </div>
+            `).join('');
+        }
+    }
+
+    if (queueBox) {
+        if (usedBurners >= 2) {
+            const { data: user } = await _supabase.auth.getUser();
+            queueBox.innerHTML = `<button onclick="joinQueue('${user.user?.id}')" class="btn-ice"><i class="fa-solid fa-clock"></i> Both Busy - Join Queue</button>`;
+        } else {
+            queueBox.innerHTML = '';
+        }
     }
 }
 
@@ -196,8 +267,10 @@ async function fetchDateWiseUsageAndCost() {
     const usedPct = Math.min(100, (totalWeightedHours / cylinderCapHours) * 100);
     const remainingPct = Math.max(0, 100 - usedPct).toFixed(1);
     
-    document.getElementById('cylinderPctText').innerText = `${remainingPct}%`;
-    document.getElementById('cylinderProgressBar').style.width = `${remainingPct}%`;
+    const pctTextElem = document.getElementById('cylinderPctText');
+    const barElem = document.getElementById('cylinderProgressBar');
+    if (pctTextElem) pctTextElem.innerText = `${remainingPct}%`;
+    if (barElem) barElem.style.width = `${remainingPct}%`;
 
     // Cost Splitter
     let costBreakdownHtml = Object.keys(userOverallMins).map(name => {
@@ -266,7 +339,6 @@ function generateCleanPDFReport() {
     doc.setFont("helvetica", "normal");
     doc.text(`Generated On: ${new Date().toLocaleDateString()}`, 14, 28);
 
-    // Build Table Body Data
     const tableBody = processedReportData.map(d => [d.date, d.user, d.meal, d.burners, d.duration]);
 
     doc.autoTable({
@@ -278,7 +350,6 @@ function generateCleanPDFReport() {
         styles: { fontSize: 9 }
     });
 
-    // Add Billing Summary Text Below Table
     const finalY = doc.lastAutoTable.finalY + 15;
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
@@ -297,6 +368,7 @@ function generateCleanPDFReport() {
 
 function initQRScanner() {
     const box = document.getElementById('qrReaderBox');
+    if (!box) return;
     box.classList.remove('hidden');
     const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
     html5QrcodeScanner.render((decodedText) => {
@@ -305,110 +377,3 @@ function initQRScanner() {
         box.classList.add('hidden');
     });
 }
-
-//For Notificaation
-
-// ১. ব্রাউজারে নোটিফিকেশন পারমিশন চাওয়া
-async function requestNotificationPermission() {
-    if ('Notification' in window) {
-        if (Notification.permission === 'default') {
-            await Notification.requestPermission();
-        }
-    }
-}
-
-// ২. পুশ নোটিফিকেশন সেন্ড করার ফাংশন
-function sendGasNotification(title, body) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, {
-            body: body,
-            icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png',
-            vibrate: [200, 100, 200]
-        });
-    }
-}
-
-// ৩. Supabase Realtime: কেউ চুলা অন বা অফ করলেই নোটিফিকেশন আসবে
-document.addEventListener('DOMContentLoaded', () => {
-    requestNotificationPermission();
-
-    _supabase
-        .channel('realtime-burner-notifications')
-        .on(
-            'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'burner_sessions' },
-            (payload) => {
-                const session = payload.new;
-                sendGasNotification(
-                    '🔥 Stove Turned ON!',
-                    `Someone started cooking on ${session.burner_count} burner(s).`
-                );
-            }
-        )
-        .on(
-            'postgres_changes',
-            { event: 'UPDATE', schema: 'public', table: 'burner_sessions' },
-            (payload) => {
-                const session = payload.new;
-                if (session.status === 'completed') {
-                    sendGasNotification(
-                        '✅ Stove Turned OFF!',
-                        `Cooking finished. Duration: ${session.duration_minutes || 0} mins.`
-                    );
-                }
-            }
-        )
-        .subscribe();
-});
-
-//For real time refresh
-// Service Worker & Web Notification Request
-if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-}
-
-function showNativeNotification(title, body) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, {
-            body: body,
-            icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png'
-        });
-    }
-}
-
-// Live Realtime Listener (No Refresh Needed)
-function setupRealtimeSync() {
-    _supabase
-        .channel('schema-db-changes')
-        .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'burner_sessions' },
-            (payload) => {
-                console.log('Change received!', payload);
-
-                // ১. অটোমেটিক রিফ্রেশ ছাড়াই ইউআই আপডেট করবে
-                if (typeof loadDashboardData === 'function') loadDashboardData();
-                if (typeof loadActiveBurners === 'function') loadActiveBurners();
-                if (typeof loadUsageLogs === 'function') loadUsageLogs();
-
-                // ২. ইনস্ট্যান্ট পুশ নোটিফিকেশন সেন্ড করবে
-                if (payload.eventType === 'INSERT') {
-                    showNativeNotification(
-                        '🔥 Stove Turned ON!',
-                        `New cooking session started on ${payload.new.burner_count} burner(s).`
-                    );
-                } else if (payload.eventType === 'UPDATE' && payload.new.status === 'completed') {
-                    showNativeNotification(
-                        '✅ Stove Turned OFF!',
-                        `Cooking session completed (${payload.new.duration_minutes || 0} mins).`
-                    );
-                }
-            }
-        )
-        .subscribe();
-}
-
-// Initialize Realtime Sync on Load
-document.addEventListener('DOMContentLoaded', () => {
-    setupRealtimeSync();
-});
