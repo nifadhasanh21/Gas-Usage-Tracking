@@ -1,0 +1,15 @@
+{
+  "short_name": "GasTracker",
+  "name": "GasTracker Aesthetic Glass Console",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/785/785116.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/dashboard.html",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "display": "standalone"
+}

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GasTracker - Sign In</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="auth-body">
+
+    <div class="auth-card">
+        <div class="brand-logo text-center mb-4">
+            <i class="fa-solid fa-fire"></i> GASTRACKER
+        </div>
+
+        <div class="auth-tabs">
+            <button id="tabLogin" class="tab-btn active">Sign In</button>
+            <button id="tabSignup" class="tab-btn">Sign Up</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="loginForm">
+            <div class="input-group mb-4">
+                <input type="email" id="loginEmail" class="input-glass" placeholder="Email Address" required>
+            </div>
+            <div class="input-group mb-4">
+                <input type="password" id="loginPassword" class="input-glass" placeholder="Password" required>
+            </div>
+            <button type="submit" class="btn-ice btn-block">Sign In</button>
+        </form>
+
+        <!-- Signup Form -->
+        <form id="signupForm" class="hidden">
+            <div class="input-group mb-4">
+                <input type="text" id="signupName" class="input-glass" placeholder="Full Name" required>
+            </div>
+            <div class="input-group mb-4">
+                <input type="email" id="signupEmail" class="input-glass" placeholder="Email Address" required>
+            </div>
+            <div class="input-group mb-4">
+                <input type="password" id="signupPassword" class="input-glass" placeholder="Password" required>
+            </div>
+            <button type="submit" class="btn-ice btn-block">Create Account</button>
+        </form>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+</body>
+</html>

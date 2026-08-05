@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Gas Tracker</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="dashboard.html" class="brand">
+                <i class="fa-solid fa-user-shield"></i>
+                <span>Admin Console</span>
+            </a>
+            <button class="nav-toggle" id="navToggle">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="dashboard.html"><i class="fa-solid fa-gauge"></i> Dashboard</a></li>
+                <li><a href="admin.html" class="active"><i class="fa-solid fa-user-shield"></i> Admin Panel</a></li>
+                <li><button id="logoutBtn" class="btn-logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</button></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Calculator -->
+        <div class="card">
+            <div class="card-header">
+                <h2><i class="fa-solid fa-calculator"></i> Monthly Bill Splitter</h2>
+                <p class="subtitle">Enter gas bill to calculate proportional roommate shares.</p>
+            </div>
+            <form id="billForm" class="bill-form-grid">
+                <div class="input-group">
+                    <i class="fa-solid fa-dollar-sign"></i>
+                    <input type="number" id="totalBillInput" placeholder="Total Bill Amount (e.g. 1200)" required>
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-wand-magic-sparkles"></i> Calculate</button>
+            </form>
+
+            <div id="billResultsContainer" class="mt-4 hidden">
+                <h3>Calculated Breakdown</h3>
+                <div class="table-responsive mt-2">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Roommate</th>
+                                <th>Weighted Hours</th>
+                                <th>Share Ratio</th>
+                                <th>Amount Due</th>
+                            </tr>
+                        </thead>
+                        <tbody id="billResultsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Master CRUD -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2><i class="fa-solid fa-list-check"></i> Master Logs Management</h2>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Burner</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="masterLogsBody">
+                        <tr><td colspan="6" class="text-center">Loading logs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>

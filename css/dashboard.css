@@ -1,0 +1,53 @@
+/* Live Timer UI */
+.timer-card {
+    background: linear-gradient(145deg, #1e293b, #111827);
+}
+
+.timer-display {
+    font-size: 3.5rem;
+    font-weight: bold;
+    font-family: 'Courier New', Courier, monospace;
+    color: var(--primary-color);
+    margin: 20px 0;
+    letter-spacing: 2px;
+}
+
+.burner-selection {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+
+.radio-label {
+    cursor: pointer;
+    background-color: #0f172a;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    transition: 0.3s;
+}
+
+.radio-label:hover {
+    border-color: var(--primary-color);
+}
+
+.radio-label input {
+    margin-right: 8px;
+}
+
+.live-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background-color: rgba(34, 197, 94, 0.2);
+    color: var(--success-color);
+    font-size: 0.85rem;
+    font-weight: 600;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
