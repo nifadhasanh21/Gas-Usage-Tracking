@@ -13,10 +13,11 @@
     <script src="https://unpkg.com/html5-qrcode"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    
     <!-- PWA Manifest & Mobile Meta Tags -->
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0f172a">
-<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/785/785116.png">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/785/785116.png">
 </head>
 <body>
 
@@ -58,38 +59,10 @@
                 </div>
             </div>
 
+            <!-- Dynamic Independent Burners Controller (JS injection) -->
             <div class="burner-status-grid" id="burnerStatusGrid"></div>
             <div id="liveCookingFeed" class="mt-3"></div>
             <div id="queueControls" class="mt-3 text-center"></div>
-        </div>
-
-        <!-- Timer Console -->
-        <div class="card text-center mb-4">
-            <div class="card-header">
-                <h2>Stove Console</h2>
-            </div>
-
-            <div class="timer-display" id="timerDisplay">00:00:00</div>
-
-            <div class="burner-selector" id="burnerSelector">
-                <label class="radio-card">
-                    <input type="radio" name="burnerOption" value="1" checked>
-                    <div class="radio-content"><i class="fa-solid fa-fire"></i> 1 Burner</div>
-                </label>
-                <label class="radio-card">
-                    <input type="radio" name="burnerOption" value="2">
-                    <div class="radio-content"><i class="fa-solid fa-fire-burner"></i> 2 Burners</div>
-                </label>
-            </div>
-
-            <div id="mealNoteBox" class="meal-input-box">
-                <input type="text" id="mealNoteInput" class="input-glass" placeholder="What are you cooking? (e.g. Rice & Meat)">
-            </div>
-
-            <div class="console-actions">
-                <button id="startBtn" class="btn-ice"><i class="fa-solid fa-play"></i> Start Cooking</button>
-                <button id="stopBtn" class="btn-ice btn-danger-ice hidden"><i class="fa-solid fa-square"></i> Stop & Save Session</button>
-            </div>
         </div>
 
         <!-- Visual Analytics Chart -->
@@ -123,9 +96,9 @@
 
     </div>
 
+    <!-- Scripts -->
     <script src="js/config.js"></script>
     <script src="js/auth.js"></script>
-    <script src="js/timer.js"></script>
     <script src="js/dashboard.js"></script>
 
     <script>

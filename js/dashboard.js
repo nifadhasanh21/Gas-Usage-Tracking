@@ -1,6 +1,7 @@
 let chartInstance = null;
 let currentRole = 'user';
 let processedReportData = []; // PDF Export Cache
+let activeTimers = {}; // Local active timer intervals
 
 // Initialize App on DOM Load
 document.addEventListener('DOMContentLoaded', async () => {
@@ -58,13 +59,12 @@ function setupRealtimeSync() {
             'postgres_changes',
             { event: '*', schema: 'public', table: 'burner_sessions' },
             (payload) => {
-                console.log('Realtime DB Change Received:', payload);
                 refreshDashboard();
 
                 if (payload.eventType === 'INSERT') {
                     sendGasNotification(
                         '🔥 Stove Turned ON!',
-                        `New cooking session started on ${payload.new.burner_count || 1} burner(s).`
+                        `New cooking session started on Burner ${payload.new.burner_index || 1}.`
                     );
                 } 
                 else if (payload.eventType === 'UPDATE' && payload.new.status === 'completed') {
@@ -79,7 +79,6 @@ function setupRealtimeSync() {
             'postgres_changes',
             { event: '*', schema: 'public', table: 'app_settings' },
             () => {
-                // এডমিন বিলের দাম বদলালে ড্যাশবোর্ডের হিসাব সাথে সাথে আপডেট হবে
                 fetchDateWiseUsageAndCost();
             }
         )
@@ -99,54 +98,157 @@ async function fetchLiveStatusAndQueue() {
     const feed = document.getElementById('liveCookingFeed');
     const queueBox = document.getElementById('queueControls');
 
+    const { data: { user } } = await _supabase.auth.getUser();
+
+    // Get running sessions
     const { data: activeSessions } = await _supabase
         .from('burner_sessions')
         .select('*, profiles(full_name)')
         .eq('status', 'running');
 
-    let usedBurners = 0;
-    activeSessions?.forEach(s => usedBurners += s.burner_count);
+    // Clear old active timers
+    Object.keys(activeTimers).forEach(id => clearInterval(activeTimers[id]));
+    activeTimers = {};
 
+    let b1Session = activeSessions?.find(s => s.burner_index === 1);
+    let b2Session = activeSessions?.find(s => s.burner_index === 2);
+
+    // Render Dual Burner Control Cards
     if (grid) {
-        grid.innerHTML = `
-            <div class="burner-badge ${usedBurners < 1 ? 'badge-free' : 'badge-busy'}">
-                Burner 1: <strong>${usedBurners < 1 ? 'FREE' : 'BUSY'}</strong>
-            </div>
-            <div class="burner-badge ${usedBurners < 2 ? 'badge-free' : 'badge-busy'}">
-                Burner 2: <strong>${usedBurners < 2 ? 'FREE' : 'BUSY'}</strong>
-            </div>
-        `;
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(280px, 1fr))';
+        grid.style.gap = '15px';
+
+        grid.innerHTML = [1, 2].map(bIndex => {
+            const session = bIndex === 1 ? b1Session : b2Session;
+            const isBusy = !!session;
+            const isOwner = session && user && session.user_id === user.id;
+
+            return `
+                <div class="card" style="border: 1px solid ${isBusy ? '#ef4444' : '#22c55e'}; background: #fafafa; padding: 15px; border-radius: 10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <h4 style="margin:0;"><i class="fa-solid fa-fire"></i> Burner ${bIndex}</h4>
+                        <span style="background:${isBusy ? '#fee2e2' : '#dcfce7'}; color:${isBusy ? '#991b1b' : '#166534'}; padding:3px 8px; border-radius:12px; font-size:0.8rem; font-weight:bold;">
+                            ${isBusy ? 'BUSY' : 'FREE'}
+                        </span>
+                    </div>
+
+                    ${isBusy ? `
+                        <div style="margin-bottom:10px;">
+                            <p style="margin:2px 0;"><strong>User:</strong> ${session.profiles?.full_name || 'Member'}</p>
+                            <p style="margin:2px 0;"><strong>Item:</strong> ${session.meal_note || 'General Cooking'}</p>
+                            <h2 style="margin:10px 0 5px 0; font-family:monospace;" id="timer_b${bIndex}">00:00:00</h2>
+                        </div>
+                        ${(isOwner || currentRole === 'admin') ? `
+                            <button onclick="stopCookingSession(${session.id}, ${bIndex}, '${session.start_time}')" class="btn-ice btn-danger-ice" style="width:100%;"><i class="fa-solid fa-square"></i> Stop Cooking</button>
+                        ` : `<p style="font-size:0.8rem; color:#666; margin:0;">In use by another member</p>`}
+                    ` : `
+                        <div>
+                            <input type="text" id="mealNote_b${bIndex}" class="input-glass" placeholder="What are you cooking?" style="width:100%; padding:8px; margin-bottom:10px; border:1px solid #ccc; border-radius:6px;">
+                            <button onclick="startCookingSession(${bIndex})" class="btn-ice" style="width:100%;"><i class="fa-solid fa-play"></i> Start Cooking</button>
+                        </div>
+                    `}
+                </div>
+            `;
+        }).join('');
+
+        // Live Timers Setup
+        activeSessions?.forEach(s => {
+            const bIndex = s.burner_index || 1;
+            const timerElem = document.getElementById(`timer_b${bIndex}`);
+            if (timerElem) {
+                const startTime = new Date(s.start_time).getTime();
+                activeTimers[s.id] = setInterval(() => {
+                    const now = new Date().getTime();
+                    const diff = Math.max(0, Math.floor((now - startTime) / 1000));
+                    const hrs = String(Math.floor(diff / 3600)).padStart(2, '0');
+                    const mins = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+                    const secs = String(diff % 60).padStart(2, '0');
+                    timerElem.innerText = `${hrs}:${mins}:${secs}`;
+                }, 1000);
+            }
+        });
     }
 
     if (feed) {
         if (!activeSessions || activeSessions.length === 0) {
-            feed.innerHTML = `<p class="subtitle text-center" style="color:var(--badge-green-text);"><i class="fa-solid fa-circle-check"></i> All burners are currently free.</p>`;
+            feed.innerHTML = `<p class="subtitle text-center" style="color:var(--badge-green-text, #166534);"><i class="fa-solid fa-circle-check"></i> All burners are currently free.</p>`;
         } else {
             feed.innerHTML = activeSessions.map(s => `
-                <div class="input-glass mb-4" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span><i class="fa-solid fa-fire"></i> <strong>${s.profiles?.full_name || 'User'}</strong>: <em>${s.meal_note || 'N/A'}</em> (${s.burner_count} burner)</span>
-                    <button onclick="emergencyForceStop(${s.id})" class="btn-ice btn-danger-ice" style="padding: 4px 10px; font-size: 0.75rem;"><i class="fa-solid fa-power-off"></i> Force Stop</button>
+                <div class="input-glass mb-2" style="display:flex; justify-content:space-between; align-items:center; padding: 10px; border-radius: 8px; background:#fff; border:1px solid #e4e4e7;">
+                    <span><i class="fa-solid fa-fire"></i> <strong>${s.profiles?.full_name || 'User'}</strong> is cooking <em>${s.meal_note || 'N/A'}</em> on Burner ${s.burner_index || 1}</span>
+                    ${currentRole === 'admin' ? `<button onclick="emergencyForceStop(${s.id})" class="btn-ice btn-danger-ice" style="padding: 4px 10px; font-size: 0.75rem;"><i class="fa-solid fa-power-off"></i> Force Stop</button>` : ''}
                 </div>
             `).join('');
         }
     }
 
     if (queueBox) {
-        if (usedBurners >= 2) {
-            const { data: user } = await _supabase.auth.getUser();
-            queueBox.innerHTML = `<button onclick="joinQueue('${user.user?.id}')" class="btn-ice"><i class="fa-solid fa-clock"></i> Both Busy - Join Queue</button>`;
+        if (b1Session && b2Session) {
+            queueBox.innerHTML = `<button onclick="joinQueue('${user?.id}')" class="btn-ice"><i class="fa-solid fa-clock"></i> Both Burners Busy - Join Queue</button>`;
         } else {
             queueBox.innerHTML = '';
         }
     }
 }
 
+// Start Cooking Action
+async function startCookingSession(burnerIndex) {
+    const { data: { user } } = await _supabase.auth.getUser();
+    if (!user) return alert('Please login first!');
+
+    const noteInput = document.getElementById(`mealNote_b${burnerIndex}`);
+    const mealNote = noteInput?.value.trim() || 'General Cooking';
+
+    const { error } = await _supabase.from('burner_sessions').insert([{
+        user_id: user.id,
+        burner_index: burnerIndex,
+        burner_count: 1,
+        meal_note: mealNote,
+        start_time: new Date().toISOString(),
+        status: 'running'
+    }]);
+
+    if (error) {
+        alert('Failed to start burner: ' + error.message);
+    } else {
+        refreshDashboard();
+    }
+}
+
+// Stop Cooking Action
+async function stopCookingSession(sessionId, burnerIndex, startTimeIso) {
+    const endTime = new Date();
+    const startTime = new Date(startTimeIso);
+    const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
+    const weightedHours = (durationMinutes / 60);
+
+    const { error } = await _supabase.from('burner_sessions').update({
+        end_time: endTime.toISOString(),
+        duration_minutes: durationMinutes,
+        weighted_hours: weightedHours,
+        status: 'completed'
+    }).eq('id', sessionId);
+
+    if (error) {
+        alert('Failed to stop session: ' + error.message);
+    } else {
+        refreshDashboard();
+    }
+}
+
 async function emergencyForceStop(sessionId) {
     if (!confirm('Are you sure you want to force shut down this active burner session?')) return;
     
-    const endTime = new Date().toISOString();
+    const { data: session } = await _supabase.from('burner_sessions').select('start_time').eq('id', sessionId).single();
+    const endTime = new Date();
+    const startTime = session ? new Date(session.start_time) : endTime;
+    const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
+
     await _supabase.from('burner_sessions').update({
-        end_time: endTime,
+        end_time: endTime.toISOString(),
+        duration_minutes: durationMinutes,
+        weighted_hours: (durationMinutes / 60),
         status: 'completed'
     }).eq('id', sessionId);
 
@@ -163,7 +265,6 @@ async function fetchDateWiseUsageAndCost() {
     const container = document.getElementById('dateWiseTablesContainer');
     if (!container) return;
 
-    // ১. লেটেস্ট বিল ও ক্যাপাসিটি রিড
     const { data: setRes } = await _supabase.from('app_settings').select('key, value');
     let cylinderCost = 1450;
     let cylinderCapHours = 80;
@@ -175,7 +276,6 @@ async function fetchDateWiseUsageAndCost() {
         });
     }
 
-    // চলতি মাসের ডাটা ফিল্টারিং (বর্তমান চলতি মাসের ব্যবহার গণনার জন্য)
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
@@ -192,7 +292,7 @@ async function fetchDateWiseUsageAndCost() {
     }
 
     const grouped = {};
-    let grandTotalMins = 0; // চলতি মাসের মোট মিনিট
+    let grandTotalMins = 0;
     let totalWeightedHours = 0;
     let userOverallMins = {};
     let chartLabels = [];
@@ -206,7 +306,6 @@ async function fetchDateWiseUsageAndCost() {
         if (!grouped[dateStr]) grouped[dateStr] = [];
         grouped[dateStr].push(row);
 
-        // কেবল চলতি মাসের মিনিটের সাথে এড হবে (পুরানো মাসের হিসাব আলাদা থাকবে)
         if (logDate.getMonth() === currentMonth && logDate.getFullYear() === currentYear) {
             const mins = parseInt(row.duration_minutes || 0);
             const name = row.profiles?.full_name || 'User';
@@ -224,17 +323,17 @@ async function fetchDateWiseUsageAndCost() {
         let dayMins = 0;
 
         html += `
-            <div class="day-table-card">
-                <h4 style="color:var(--text-secondary); margin-bottom: 12px;"><i class="fa-regular fa-calendar"></i> Date: ${dateStr}</h4>
+            <div class="day-table-card mb-4" style="background:#fff; padding:15px; border-radius:10px; border:1px solid #e4e4e7;">
+                <h4 style="color:var(--text-secondary, #4b5563); margin-bottom: 12px;"><i class="fa-regular fa-calendar"></i> Date: ${dateStr}</h4>
                 <div class="table-responsive">
-                    <table>
+                    <table style="width:100%; border-collapse:collapse;">
                         <thead>
-                            <tr>
-                                <th>User</th>
-                                <th>Meal / Item</th>
-                                <th>Burners Used</th>
-                                <th>Duration</th>
-                                ${currentRole === 'admin' ? '<th style="text-align:right;">Action</th>' : ''}
+                            <tr style="border-bottom:2px solid #e4e4e7; text-align:left;">
+                                <th style="padding:8px;">User</th>
+                                <th style="padding:8px;">Meal / Item</th>
+                                <th style="padding:8px;">Burner</th>
+                                <th style="padding:8px;">Duration</th>
+                                ${currentRole === 'admin' ? '<th style="text-align:right; padding:8px;">Action</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
@@ -245,24 +344,24 @@ async function fetchDateWiseUsageAndCost() {
             const mins = parseInt(item.duration_minutes || 0);
 
             dayMins += mins;
-            totalWeightedHours += parseFloat(item.weighted_hours || 0);
+            totalWeightedHours += parseFloat(item.weighted_hours || (mins / 60));
 
             processedReportData.push({
                 date: dateStr,
                 user: name,
                 meal: item.meal_note || 'General Cooking',
-                burners: `${item.burner_count} Burner(s)`,
+                burners: `Burner ${item.burner_index || 1}`,
                 duration: `${mins} mins`
             });
 
             html += `
-                <tr>
-                    <td><strong>${name}</strong></td>
-                    <td>${item.meal_note || 'General Cooking'}</td>
-                    <td>${item.burner_count} Burner(s)</td>
-                    <td>${mins} mins</td>
+                <tr style="border-bottom:1px solid #f4f4f5;">
+                    <td style="padding:8px;"><strong>${name}</strong></td>
+                    <td style="padding:8px;">${item.meal_note || 'General Cooking'}</td>
+                    <td style="padding:8px;">Burner ${item.burner_index || 1}</td>
+                    <td style="padding:8px;">${mins} mins</td>
                     ${currentRole === 'admin' ? `
-                        <td style="text-align:right;">
+                        <td style="text-align:right; padding:8px;">
                             <button onclick="deleteSessionLog(${item.id})" class="btn-ice btn-danger-ice" style="padding: 4px 8px; font-size: 0.75rem;"><i class="fa-solid fa-trash"></i></button>
                         </td>
                     ` : ''}
@@ -281,7 +380,7 @@ async function fetchDateWiseUsageAndCost() {
         chartData.unshift(dayMins);
     }
 
-    // Cylinder Remaining Percentage Logic
+    // Cylinder Percentage calculation
     const usedPct = Math.min(100, (totalWeightedHours / cylinderCapHours) * 100);
     const remainingPct = Math.max(0, 100 - usedPct).toFixed(1);
     
@@ -290,7 +389,7 @@ async function fetchDateWiseUsageAndCost() {
     if (pctTextElem) pctTextElem.innerText = `${remainingPct}%`;
     if (barElem) barElem.style.width = `${remainingPct}%`;
 
-    // Dynamic Monthly Cost Splitter
+    // Bill Splitter Calculation
     let costBreakdownHtml = '';
     if (Object.keys(userOverallMins).length === 0) {
         costBreakdownHtml = `<p>No cooking logs for the current month yet.</p>`;
@@ -304,9 +403,9 @@ async function fetchDateWiseUsageAndCost() {
     }
 
     html += `
-        <div class="grand-total-box">
-            <h4>Current Month Bill Splitter (Cylinder: ${cylinderCost} BDT)</h4>
-            <p class="mb-4">Current Month Total Gas Use: <strong>${grandTotalMins} Minutes</strong></p>
+        <div class="grand-total-box" style="background:#f8fafc; padding:15px; border-radius:10px; border:1px solid #e2e8f0; margin-top:20px;">
+            <h4 style="margin-top:0;">Current Month Bill Splitter (Cylinder: ${cylinderCost} BDT)</h4>
+            <p class="mb-2">Current Month Total Gas Use: <strong>${grandTotalMins} Minutes</strong></p>
             <div>${costBreakdownHtml}</div>
         </div>
     `;
@@ -337,7 +436,7 @@ function renderAnalyticsChart(labels, data) {
             datasets: [{
                 label: 'Gas Used (Minutes)',
                 data: data,
-                backgroundColor: '#09090b',
+                backgroundColor: '#0f172a',
                 borderRadius: 6
             }]
         },
@@ -369,7 +468,7 @@ function generateCleanPDFReport() {
         head: [['Date', 'Member', 'Meal Note', 'Burners', 'Duration']],
         body: tableBody,
         theme: 'striped',
-        headStyles: { fillColor: [9, 9, 11] },
+        headStyles: { fillColor: [15, 23, 42] },
         styles: { fontSize: 9 }
     });
 
