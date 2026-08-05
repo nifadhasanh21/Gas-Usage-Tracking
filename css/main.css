@@ -554,3 +554,95 @@ td {
         grid-template-columns: 1fr;
     }
 }
+
+/* ==========================================
+   Mobile & Tablet Fully Responsive Fix
+   ========================================== */
+
+@media (max-width: 768px) {
+    /* Container & Spacing */
+    .container {
+        margin: 15px auto !important;
+        padding: 0 12px !important;
+        width: 100% !important;
+        overflow-x: hidden;
+    }
+
+    /* Navbar Responsiveness */
+    .nav-container {
+        flex-direction: column !important;
+        align-items: center !important;
+        padding: 12px 10px !important;
+        gap: 12px !important;
+    }
+
+    .brand {
+        font-size: 1.1rem !important;
+    }
+
+    .nav-menu {
+        flex-wrap: wrap !important;
+        justify-content: center !important;
+        gap: 8px !important;
+        width: 100% !important;
+    }
+
+    .nav-menu li {
+        margin: 2px 0;
+    }
+
+    .nav-menu a {
+        font-size: 0.8rem !important;
+        padding: 6px 10px !important;
+        white-space: nowrap !important;
+    }
+
+    .profile-btn {
+        padding: 4px 10px !important;
+        font-size: 0.8rem !important;
+    }
+
+    /* Cards & Layout Fixes */
+    .card {
+        padding: 16px !important;
+        border-radius: 12px !important;
+    }
+
+    .timer-display {
+        font-size: 3rem !important;
+    }
+
+    /* Table Horizontal Scroll Fix */
+    .table-responsive {
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+        display: block;
+    }
+
+    table {
+        min-width: 480px; /* টেবিল ভাঙা আটকাবে, স্মুথ স্ক্রোল হবে */
+    }
+
+    th, td {
+        padding: 8px 10px !important;
+        font-size: 0.8rem !important;
+    }
+
+    /* Grid Layouts Stack on Mobile */
+    .burner-status-grid, 
+    .user-stats-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+
+    .burner-selector {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .radio-content {
+        padding: 8px 14px !important;
+        font-size: 0.85rem !important;
+    }
+}
