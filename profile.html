@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GasTracker - My Profile</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Supabase JS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="dashboard.html" class="brand">
+                <i class="fa-solid fa-fire"></i> GASTRACKER
+            </a>
+            <ul class="nav-menu">
+                <li><a href="dashboard.html">Dashboard</a></li>
+                <li><a href="dashboard.html#allUsageSection">All Usage Logs</a></li>
+                <li>
+                    <a href="profile.html" class="profile-btn active">
+                        <i class="fa-solid fa-user"></i>
+                        <span>My Profile</span>
+                    </a>
+                </li>
+                <li><button id="logoutBtn" class="btn-ice btn-danger-ice" style="padding: 6px 12px;"><i class="fa-solid fa-power-off"></i></button></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        
+        <!-- Profile Card -->
+        <div class="card profile-card mb-4">
+            <div class="profile-avatar" id="avatarInitial">U</div>
+            <h2 id="userName">Loading...</h2>
+            <p class="subtitle" id="userEmail">Loading email...</p>
+            <div id="userRoleBadge" class="mt-3"></div>
+        </div>
+
+        <!-- Personal Usage Summary -->
+        <div class="card mb-4">
+            <div class="card-header text-center">
+                <h3><i class="fa-solid fa-chart-pie"></i> My Usage Summary</h3>
+                <p class="subtitle">Overview of your individual gas consumption & estimated bill</p>
+            </div>
+
+            <div class="user-stats-grid">
+                <div class="stat-card">
+                    <h4>Total Gas Used</h4>
+                    <p id="totalUserMins">0 Mins</p>
+                </div>
+                <div class="stat-card">
+                    <h4>Total Estimated Bill</h4>
+                    <p id="totalUserCost">0.00 BDT</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Personal Session History -->
+        <div class="card">
+            <div class="card-header mb-4">
+                <h3><i class="fa-solid fa-clock-rotate-left"></i> My Session History</h3>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Meal / Item</th>
+                            <th>Burners</th>
+                            <th>Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="myHistoryTableBody">
+                        <tr>
+                            <td colspan="4" class="text-center">Loading history...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/profile.js"></script>
+</body>
+</html>

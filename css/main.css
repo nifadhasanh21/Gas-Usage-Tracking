@@ -481,3 +481,76 @@ td {
         justify-content: space-between;
     }
 }
+
+/* Profile Nav Button */
+.profile-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-subtle) !important;
+    padding: 6px 14px !important;
+    border-radius: 20px !important;
+    border: 1px solid var(--card-border) !important;
+    font-weight: 600 !important;
+}
+
+.profile-btn:hover {
+    background: #e4e4e7 !important;
+}
+
+/* User Profile Page Layout */
+.profile-card {
+    text-align: center;
+    padding: 32px 24px;
+}
+
+.profile-avatar {
+    width: 72px;
+    height: 72px;
+    background: var(--accent-black);
+    color: #ffffff;
+    font-size: 1.8rem;
+    font-weight: 700;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 16px auto;
+}
+
+/* User Stats Grid (Usage & Cost) */
+.user-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 24px;
+}
+
+.stat-card {
+    background: var(--bg-subtle);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    text-align: center;
+}
+
+.stat-card h4 {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-card p {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--accent-black);
+    margin-top: 6px;
+}
+
+/* Responsive Grid for Mobile */
+@media (max-width: 600px) {
+    .user-stats-grid {
+        grid-template-columns: 1fr;
+    }
+}
