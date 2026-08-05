@@ -360,3 +360,55 @@ document.addEventListener('DOMContentLoaded', () => {
         )
         .subscribe();
 });
+
+//For real time refresh
+// Service Worker & Web Notification Request
+if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+}
+
+function showNativeNotification(title, body) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, {
+            body: body,
+            icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png'
+        });
+    }
+}
+
+// Live Realtime Listener (No Refresh Needed)
+function setupRealtimeSync() {
+    _supabase
+        .channel('schema-db-changes')
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'burner_sessions' },
+            (payload) => {
+                console.log('Change received!', payload);
+
+                // ১. অটোমেটিক রিফ্রেশ ছাড়াই ইউআই আপডেট করবে
+                if (typeof loadDashboardData === 'function') loadDashboardData();
+                if (typeof loadActiveBurners === 'function') loadActiveBurners();
+                if (typeof loadUsageLogs === 'function') loadUsageLogs();
+
+                // ২. ইনস্ট্যান্ট পুশ নোটিফিকেশন সেন্ড করবে
+                if (payload.eventType === 'INSERT') {
+                    showNativeNotification(
+                        '🔥 Stove Turned ON!',
+                        `New cooking session started on ${payload.new.burner_count} burner(s).`
+                    );
+                } else if (payload.eventType === 'UPDATE' && payload.new.status === 'completed') {
+                    showNativeNotification(
+                        '✅ Stove Turned OFF!',
+                        `Cooking session completed (${payload.new.duration_minutes || 0} mins).`
+                    );
+                }
+            }
+        )
+        .subscribe();
+}
+
+// Initialize Realtime Sync on Load
+document.addEventListener('DOMContentLoaded', () => {
+    setupRealtimeSync();
+});
