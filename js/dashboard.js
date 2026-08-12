@@ -6,6 +6,7 @@ let activeTimers = {}; // Local active timer intervals
 // Initialize App on DOM Load
 document.addEventListener('DOMContentLoaded', async () => {
     await checkUserRole();
+    await registerServiceWorker();
     await requestNotificationPermission();
     
     // Initial Data Fetch
@@ -20,6 +21,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ==========================================
+// Service Worker Registration for PWA
+// ==========================================
+async function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        try {
+            await navigator.serviceWorker.register('/sw.js');
+        } catch (err) {
+            console.log('SW Registration failed:', err);
+        }
+    }
+}
+
+// ==========================================
 // User Authentication & Role Management
 // ==========================================
 async function checkUserRole() {
@@ -31,7 +45,7 @@ async function checkUserRole() {
 }
 
 // ==========================================
-// PWA Notification Management
+// PWA & Cross-Browser Notification System
 // ==========================================
 async function requestNotificationPermission() {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -39,23 +53,38 @@ async function requestNotificationPermission() {
     }
 }
 
-function sendGasNotification(title, body) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-        const options = {
-            body: body,
-            icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png',
-            vibrate: [200, 100, 200]
-        };
+async function sendGasNotification(title, body) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+        return;
+    }
 
-        // Service Worker Notification for PWA Mode
-        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-            navigator.serviceWorker.ready.then(reg => {
-                reg.showNotification(title, options);
-            });
-        } else {
-            // Standard Browser Notification Fallback
-            new Notification(title, options);
+    const notificationOptions = {
+        body: body,
+        icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png',
+        badge: 'https://cdn-icons-png.flaticon.com/512/785/785116.png',
+        vibrate: [200, 100, 200],
+        tag: 'gas-tracker-alert',
+        renotify: true
+    };
+
+    // Priority 1: Service Worker Notification (Required for Android/iOS PWA Mobile)
+    if ('serviceWorker' in navigator) {
+        try {
+            const reg = await navigator.serviceWorker.ready;
+            if (reg && reg.showNotification) {
+                await reg.showNotification(title, notificationOptions);
+                return;
+            }
+        } catch (err) {
+            console.log('Service Worker notification fallback:', err);
         }
+    }
+
+    // Priority 2: Standard Desktop / In-Tab Notification Fallback
+    try {
+        new Notification(title, notificationOptions);
+    } catch (e) {
+        console.log('Standard Notification error:', e);
     }
 }
 
