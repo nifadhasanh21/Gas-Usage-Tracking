@@ -67,8 +67,22 @@ async function sendGasNotification(title, body) {
         renotify: true
     };
 
-    // Priority 1: Service Worker Notification (Required for Android/iOS PWA Mobile)
+    // Priority 1: Service Worker Message (Cross-Browser & Mobile Support)
     if ('serviceWorker' in navigator) {
+        try {
+            const reg = await navigator.serviceWorker.ready;
+            if (reg.active) {
+                reg.active.postMessage({
+                    type: 'SHOW_NOTIFICATION',
+                    title: title,
+                    options: notificationOptions
+                });
+                return;
+            }
+        } catch (err) {
+            console.log('SW postMessage failed, falling back to showNotification:', err);
+        }
+
         try {
             const reg = await navigator.serviceWorker.ready;
             if (reg && reg.showNotification) {
@@ -76,7 +90,7 @@ async function sendGasNotification(title, body) {
                 return;
             }
         } catch (err) {
-            console.log('Service Worker notification fallback:', err);
+            console.log('Service Worker notification fallback failed:', err);
         }
     }
 
@@ -232,7 +246,7 @@ async function fetchLiveStatusAndQueue() {
     }
 }
 
-// Start Cooking Action (With Optimistic Instant UI Update)
+// Start Cooking Action
 async function startCookingSession(burnerIndex) {
     const { data: { user } } = await _supabase.auth.getUser();
     if (!user) return alert('Please login first!');
@@ -265,7 +279,7 @@ async function startCookingSession(burnerIndex) {
     }
 }
 
-// Stop Cooking Action (With Optimistic Instant UI Update)
+// Stop Cooking Action
 async function stopCookingSession(sessionId, burnerIndex, startTimeIso) {
     const btn = document.getElementById(`btn_stop_b${burnerIndex}`);
     if (btn) {
