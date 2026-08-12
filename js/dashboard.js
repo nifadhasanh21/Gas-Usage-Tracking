@@ -31,7 +31,7 @@ async function checkUserRole() {
 }
 
 // ==========================================
-// Notification Management
+// PWA Notification Management
 // ==========================================
 async function requestNotificationPermission() {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -41,11 +41,21 @@ async function requestNotificationPermission() {
 
 function sendGasNotification(title, body) {
     if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, {
+        const options = {
             body: body,
             icon: 'https://cdn-icons-png.flaticon.com/512/785/785116.png',
             vibrate: [200, 100, 200]
-        });
+        };
+
+        // Service Worker Notification for PWA Mode
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.ready.then(reg => {
+                reg.showNotification(title, options);
+            });
+        } else {
+            // Standard Browser Notification Fallback
+            new Notification(title, options);
+        }
     }
 }
 
@@ -62,9 +72,10 @@ function setupRealtimeSync() {
                 refreshDashboard();
 
                 if (payload.eventType === 'INSERT') {
+                    const burnerNum = payload.new.burner_count || payload.new.burner_index || 1;
                     sendGasNotification(
                         '🔥 Stove Turned ON!',
-                        `New cooking session started on Burner ${payload.new.burner_index || 1}.`
+                        `New cooking session started on Burner ${burnerNum}.`
                     );
                 } 
                 else if (payload.eventType === 'UPDATE' && payload.new.status === 'completed') {
@@ -110,8 +121,8 @@ async function fetchLiveStatusAndQueue() {
     Object.keys(activeTimers).forEach(id => clearInterval(activeTimers[id]));
     activeTimers = {};
 
-    let b1Session = activeSessions?.find(s => s.burner_index === 1);
-    let b2Session = activeSessions?.find(s => s.burner_index === 2);
+    let b1Session = activeSessions?.find(s => (s.burner_count || s.burner_index) === 1);
+    let b2Session = activeSessions?.find(s => (s.burner_count || s.burner_index) === 2);
 
     // Render Dual Burner Control Cards
     if (grid) {
@@ -140,12 +151,12 @@ async function fetchLiveStatusAndQueue() {
                             <h2 style="margin:10px 0 5px 0; font-family:monospace;" id="timer_b${bIndex}">00:00:00</h2>
                         </div>
                         ${(isOwner || currentRole === 'admin') ? `
-                            <button onclick="stopCookingSession(${session.id}, ${bIndex}, '${session.start_time}')" class="btn-ice btn-danger-ice" style="width:100%;"><i class="fa-solid fa-square"></i> Stop Cooking</button>
+                            <button id="btn_stop_b${bIndex}" onclick="stopCookingSession(${session.id}, ${bIndex}, '${session.start_time}')" class="btn-ice btn-danger-ice" style="width:100%;"><i class="fa-solid fa-square"></i> Stop Cooking</button>
                         ` : `<p style="font-size:0.8rem; color:#666; margin:0;">In use by another member</p>`}
                     ` : `
                         <div>
                             <input type="text" id="mealNote_b${bIndex}" class="input-glass" placeholder="What are you cooking?" style="width:100%; padding:8px; margin-bottom:10px; border:1px solid #ccc; border-radius:6px;">
-                            <button onclick="startCookingSession(${bIndex})" class="btn-ice" style="width:100%;"><i class="fa-solid fa-play"></i> Start Cooking</button>
+                            <button id="btn_start_b${bIndex}" onclick="startCookingSession(${bIndex})" class="btn-ice" style="width:100%;"><i class="fa-solid fa-play"></i> Start Cooking</button>
                         </div>
                     `}
                 </div>
@@ -154,7 +165,7 @@ async function fetchLiveStatusAndQueue() {
 
         // Live Timers Setup
         activeSessions?.forEach(s => {
-            const bIndex = s.burner_index || 1;
+            const bIndex = s.burner_count || s.burner_index || 1;
             const timerElem = document.getElementById(`timer_b${bIndex}`);
             if (timerElem) {
                 const startTime = new Date(s.start_time).getTime();
@@ -176,7 +187,7 @@ async function fetchLiveStatusAndQueue() {
         } else {
             feed.innerHTML = activeSessions.map(s => `
                 <div class="input-glass mb-2" style="display:flex; justify-content:space-between; align-items:center; padding: 10px; border-radius: 8px; background:#fff; border:1px solid #e4e4e7;">
-                    <span><i class="fa-solid fa-fire"></i> <strong>${s.profiles?.full_name || 'User'}</strong> is cooking <em>${s.meal_note || 'N/A'}</em> on Burner ${s.burner_index || 1}</span>
+                    <span><i class="fa-solid fa-fire"></i> <strong>${s.profiles?.full_name || 'User'}</strong> is cooking <em>${s.meal_note || 'N/A'}</em> on Burner ${s.burner_count || s.burner_index || 1}</span>
                     ${currentRole === 'admin' ? `<button onclick="emergencyForceStop(${s.id})" class="btn-ice btn-danger-ice" style="padding: 4px 10px; font-size: 0.75rem;"><i class="fa-solid fa-power-off"></i> Force Stop</button>` : ''}
                 </div>
             `).join('');
@@ -192,18 +203,23 @@ async function fetchLiveStatusAndQueue() {
     }
 }
 
-// Start Cooking Action
+// Start Cooking Action (With Optimistic Instant UI Update)
 async function startCookingSession(burnerIndex) {
     const { data: { user } } = await _supabase.auth.getUser();
     if (!user) return alert('Please login first!');
+
+    const btn = document.getElementById(`btn_start_b${burnerIndex}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Starting...`;
+    }
 
     const noteInput = document.getElementById(`mealNote_b${burnerIndex}`);
     const mealNote = noteInput?.value.trim() || 'General Cooking';
 
     const { error } = await _supabase.from('burner_sessions').insert([{
         user_id: user.id,
-        burner_index: burnerIndex,
-        burner_count: 1,
+        burner_count: burnerIndex,
         meal_note: mealNote,
         start_time: new Date().toISOString(),
         status: 'running'
@@ -211,13 +227,23 @@ async function startCookingSession(burnerIndex) {
 
     if (error) {
         alert('Failed to start burner: ' + error.message);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-play"></i> Start Cooking`;
+        }
     } else {
         refreshDashboard();
     }
 }
 
-// Stop Cooking Action
+// Stop Cooking Action (With Optimistic Instant UI Update)
 async function stopCookingSession(sessionId, burnerIndex, startTimeIso) {
+    const btn = document.getElementById(`btn_stop_b${burnerIndex}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Stopping...`;
+    }
+
     const endTime = new Date();
     const startTime = new Date(startTimeIso);
     const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
@@ -232,6 +258,10 @@ async function stopCookingSession(sessionId, burnerIndex, startTimeIso) {
 
     if (error) {
         alert('Failed to stop session: ' + error.message);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-square"></i> Stop Cooking`;
+        }
     } else {
         refreshDashboard();
     }
@@ -342,6 +372,7 @@ async function fetchDateWiseUsageAndCost() {
         dayLogs.forEach(item => {
             const name = item.profiles?.full_name || 'User';
             const mins = parseInt(item.duration_minutes || 0);
+            const burnerNum = item.burner_count || item.burner_index || 1;
 
             dayMins += mins;
             totalWeightedHours += parseFloat(item.weighted_hours || (mins / 60));
@@ -350,7 +381,7 @@ async function fetchDateWiseUsageAndCost() {
                 date: dateStr,
                 user: name,
                 meal: item.meal_note || 'General Cooking',
-                burners: `Burner ${item.burner_index || 1}`,
+                burners: `Burner ${burnerNum}`,
                 duration: `${mins} mins`
             });
 
@@ -358,7 +389,7 @@ async function fetchDateWiseUsageAndCost() {
                 <tr style="border-bottom:1px solid #f4f4f5;">
                     <td style="padding:8px;"><strong>${name}</strong></td>
                     <td style="padding:8px;">${item.meal_note || 'General Cooking'}</td>
-                    <td style="padding:8px;">Burner ${item.burner_index || 1}</td>
+                    <td style="padding:8px;">Burner ${burnerNum}</td>
                     <td style="padding:8px;">${mins} mins</td>
                     ${currentRole === 'admin' ? `
                         <td style="text-align:right; padding:8px;">
