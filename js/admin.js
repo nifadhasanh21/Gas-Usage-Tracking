@@ -33,17 +33,51 @@ async function fetchLogs() {
     tbody.innerHTML = data.map(log => `
         <tr>
             <td><strong>${log.profiles?.full_name || 'N/A'}</strong></td>
-            <td>${log.burner_count} Burner</td>
+            <td>${log.burner_count || 1} Burner</td>
             <td>${new Date(log.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
             <td>${log.end_time ? new Date(log.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '<span style="color:orange;">Running</span>'}</td>
-            <td><span class="badge">${log.status}</span></td>
+            <td><span class="badge">${log.duration_minutes || 0} mins</span></td>
             <td>
+                <button class="btn btn-primary" style="padding:4px 8px; font-size:0.8rem; margin-right:4px;" onclick="editLogDuration(${log.id}, ${log.duration_minutes || 0})">
+                    <i class="fa-solid fa-pen-to-square"></i> Edit
+                </button>
                 <button class="btn btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="removeLog(${log.id})">
                     <i class="fa-solid fa-trash"></i>
                 </button>
             </td>
         </tr>
     `).join('');
+}
+
+// ==========================================
+// Edit Cooking Log Duration (Admin Only)
+// ==========================================
+async function editLogDuration(id, currentMins) {
+    const newMinsInput = prompt(`Edit Cooking Duration (Minutes):\nCurrent: ${currentMins} mins`, currentMins);
+    if (newMinsInput === null) return;
+
+    const newMins = parseInt(newMinsInput, 10);
+    if (isNaN(newMins) || newMins < 0) {
+        return alert('Please enter a valid number of minutes.');
+    }
+
+    const newWeightedHours = parseFloat((newMins / 60).toFixed(4));
+
+    const { error } = await _supabase
+        .from('burner_sessions')
+        .update({
+            duration_minutes: newMins,
+            weighted_hours: newWeightedHours
+        })
+        .eq('id', id);
+
+    if (error) {
+        alert('Failed to update duration: ' + error.message);
+    } else {
+        alert('Updated successfully!');
+        fetchLogs();
+        if (typeof refreshDashboard === 'function') refreshDashboard();
+    }
 }
 
 // ==========================================

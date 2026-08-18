@@ -310,13 +310,20 @@ async function stopCookingSession(sessionId, burnerIndex, startTimeIso) {
     }
 }
 
+// Emergency Force Stop (Updated to prompt custom minutes)
 async function emergencyForceStop(sessionId) {
     if (!confirm('Are you sure you want to force shut down this active burner session?')) return;
     
     const { data: session } = await _supabase.from('burner_sessions').select('start_time').eq('id', sessionId).single();
     const endTime = new Date();
     const startTime = session ? new Date(session.start_time) : endTime;
-    const durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
+    
+    let durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
+
+    const inputMins = prompt(`Actual time elapsed: ${durationMinutes} mins.\nEnter corrected minutes for log (or click OK to keep as is):`, durationMinutes);
+    if (inputMins !== null && !isNaN(parseInt(inputMins, 10))) {
+        durationMinutes = Math.max(0, parseInt(inputMins, 10));
+    }
 
     await _supabase.from('burner_sessions').update({
         end_time: endTime.toISOString(),
@@ -436,7 +443,8 @@ async function fetchDateWiseUsageAndCost() {
                     <td style="padding:8px;">${mins} mins</td>
                     ${currentRole === 'admin' ? `
                         <td style="text-align:right; padding:8px;">
-                            <button onclick="deleteSessionLog(${item.id})" class="btn-ice btn-danger-ice" style="padding: 4px 8px; font-size: 0.75rem;"><i class="fa-solid fa-trash"></i></button>
+                            <button onclick="editSessionDuration(${item.id}, ${mins})" class="btn-ice" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Edit Minutes"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+                            <button onclick="deleteSessionLog(${item.id})" class="btn-ice btn-danger-ice" style="padding: 4px 8px; font-size: 0.75rem;" title="Delete Log"><i class="fa-solid fa-trash"></i></button>
                         </td>
                     ` : ''}
                 </tr>
@@ -486,6 +494,42 @@ async function fetchDateWiseUsageAndCost() {
 
     container.innerHTML = html;
     renderAnalyticsChart(chartLabels.slice(-7), chartData.slice(-7));
+}
+
+// ==========================================
+// Admin Feature: Edit Cooking Duration (Minutes)
+// ==========================================
+async function editSessionDuration(sessionId, currentMins) {
+    if (currentRole !== 'admin') {
+        return alert('Only admins can edit usage duration.');
+    }
+
+    const newMinsInput = prompt(`Edit Cooking Duration (Minutes):\nCurrent: ${currentMins} mins`, currentMins);
+
+    if (newMinsInput === null) return; // Prompt closed
+
+    const newMins = parseInt(newMinsInput, 10);
+
+    if (isNaN(newMins) || newMins < 0) {
+        return alert('Please enter a valid positive number of minutes.');
+    }
+
+    const newWeightedHours = parseFloat((newMins / 60).toFixed(4));
+
+    const { error } = await _supabase
+        .from('burner_sessions')
+        .update({
+            duration_minutes: newMins,
+            weighted_hours: newWeightedHours
+        })
+        .eq('id', sessionId);
+
+    if (error) {
+        alert('Failed to update duration: ' + error.message);
+    } else {
+        alert('Duration updated successfully!');
+        refreshDashboard();
+    }
 }
 
 async function deleteSessionLog(sessionId) {
