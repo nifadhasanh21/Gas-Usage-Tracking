@@ -34,11 +34,24 @@ async function registerServiceWorker() {
     }
 }
 
+// ==========================================
+// Check User Role & Toggle UI Features (PDF Button Control)
+// ==========================================
 async function checkUserRole() {
     const { data: { user } } = await _supabase.auth.getUser();
     if (user) {
         const { data } = await _supabase.from('profiles').select('role').eq('id', user.id).single();
         if (data) currentRole = data.role;
+    }
+
+    // Hide/Show PDF Download Button strictly for Admin
+    const pdfBtn = document.getElementById('downloadPdfBtn');
+    if (pdfBtn) {
+        if (currentRole === 'admin') {
+            pdfBtn.style.display = 'inline-flex';
+        } else {
+            pdfBtn.style.display = 'none';
+        }
     }
 }
 
@@ -315,7 +328,7 @@ async function fetchDateWiseUsageAndCost() {
         });
     }
 
-    // ALL completed logs fetch (no data is ever deleted)
+    // ALL completed logs fetch
     const { data } = await _supabase
         .from('burner_sessions')
         .select('*, profiles(full_name)')
@@ -508,7 +521,15 @@ function renderAnalyticsChart(labels, data) {
     });
 }
 
+// ==========================================
+// Admin-Only PDF Report Generation
+// ==========================================
 function generateCleanPDFReport() {
+    if (currentRole !== 'admin') {
+        alert('Access Denied: Only admins can download PDF reports.');
+        return;
+    }
+
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
 
