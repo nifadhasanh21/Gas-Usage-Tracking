@@ -197,7 +197,19 @@ async function fetchLiveStatusAndQueue() {
         if (!activeSessions || activeSessions.length === 0) {
             feed.innerHTML = `<p class="subtitle text-center" style="color:var(--badge-green-text, #166534);"><i class="fa-solid fa-circle-check"></i> All burners are currently free.</p>`;
         } else {
-            feed.innerHTML = activeSessions.map(s => `
+            // Deduplicate: Keep only 1 active session per burner to prevent double listing
+            const uniqueSessions = [];
+            const seenBurners = new Set();
+
+            activeSessions.sort((a, b) => b.id - a.id).forEach(s => {
+                const bNum = s.burner_count || s.burner_index || 1;
+                if (!seenBurners.has(bNum)) {
+                    seenBurners.add(bNum);
+                    uniqueSessions.push(s);
+                }
+            });
+
+            feed.innerHTML = uniqueSessions.map(s => `
                 <div class="input-glass mb-2" style="display:flex; justify-content:space-between; align-items:center; padding: 10px; border-radius: 8px; background:#fff; border:1px solid #e4e4e7;">
                     <span><i class="fa-solid fa-fire"></i> <strong>${s.profiles?.full_name || 'User'}</strong> is cooking <em>${s.meal_note || 'N/A'}</em> on Burner ${s.burner_count || s.burner_index || 1}</span>
                     ${currentRole === 'admin' ? `<button onclick="emergencyForceStop(${s.id})" class="btn-ice btn-danger-ice" style="padding: 4px 10px; font-size: 0.75rem;"><i class="fa-solid fa-power-off"></i> Force Stop</button>` : ''}
@@ -218,6 +230,19 @@ async function fetchLiveStatusAndQueue() {
 async function startCookingSession(burnerIndex) {
     const { data: { user } } = await _supabase.auth.getUser();
     if (!user) return alert('Please login first!');
+
+    // Check if burner already has a running session to prevent duplicates
+    const { data: existing } = await _supabase
+        .from('burner_sessions')
+        .select('id')
+        .eq('status', 'running')
+        .or(`burner_count.eq.${burnerIndex},burner_index.eq.${burnerIndex}`);
+
+    if (existing && existing.length > 0) {
+        alert(`Burner ${burnerIndex} is already running!`);
+        refreshDashboard();
+        return;
+    }
 
     const btn = document.getElementById(`btn_start_b${burnerIndex}`);
     if (btn) {
