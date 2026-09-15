@@ -1,12 +1,113 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await initCylinderSettings();
     fetchLogs();
     
-    // ফর্ম সাবমিট ইভেন্ট হ্যান্ডলার
     const billForm = document.getElementById('billForm');
     if (billForm) {
         billForm.addEventListener('submit', runBillCalculation);
     }
+
+    const finishBtn = document.getElementById('finishCylinderBtn');
+    if (finishBtn) {
+        finishBtn.addEventListener('click', finishAndStartNewCylinder);
+    }
+
+    const saveDateBtn = document.getElementById('saveStartDateBtn');
+    if (saveDateBtn) {
+        saveDateBtn.addEventListener('click', updateCylinderStartDate);
+    }
 });
+
+let currentCylinderId = 1;
+let currentCylinderStartDate = null;
+
+// ==========================================
+// Initialize Cylinder Settings
+// ==========================================
+async function initCylinderSettings() {
+    const { data } = await _supabase.from('app_settings').select('key, value');
+    if (data) {
+        data.forEach(s => {
+            if (s.key === 'current_cylinder_id') currentCylinderId = parseInt(s.value || 1);
+            if (s.key === 'current_cylinder_start_date') currentCylinderStartDate = s.value;
+            if (s.key === 'cylinder_cost') {
+                const billInput = document.getElementById('totalBillInput');
+                if (billInput) billInput.value = s.value;
+            }
+        });
+    }
+
+    // যদি তারিখ সেট না থাকে, ডাটাবেজ থেকে সবচেয়ে পুরানো কুকিং লগের তারিখ (যেমন: ৬ আগস্ট) অটো সিলেক্ট হবে
+    if (!currentCylinderStartDate) {
+        const { data: firstLog } = await _supabase
+            .from('burner_sessions')
+            .select('start_time')
+            .order('start_time', { ascending: true })
+            .limit(1)
+            .single();
+
+        currentCylinderStartDate = firstLog?.start_time || new Date().toISOString();
+        await _supabase.from('app_settings').upsert({ key: 'current_cylinder_start_date', value: currentCylinderStartDate }, { onConflict: 'key' });
+    }
+
+    const idDisplay = document.getElementById('currentCylinderIdDisplay');
+    const dateDisplay = document.getElementById('currentCylinderStartDate');
+    const dateInput = document.getElementById('startDateInput');
+
+    if (idDisplay) idDisplay.innerText = `Cylinder #${currentCylinderId}`;
+    if (dateDisplay) dateDisplay.innerText = new Date(currentCylinderStartDate).toLocaleString();
+    
+    // Set value in datetime-local input (YYYY-MM-DDTHH:mm)
+    if (dateInput && currentCylinderStartDate) {
+        const dateObj = new Date(currentCylinderStartDate);
+        const isoLocal = new Date(dateObj.getTime() - (dateObj.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+        dateInput.value = isoLocal;
+    }
+}
+
+// ==========================================
+// Admin Update Cylinder Start Date Manually
+// ==========================================
+async function updateCylinderStartDate() {
+    const dateInput = document.getElementById('startDateInput');
+    if (!dateInput || !dateInput.value) {
+        return alert("Please select a valid date and time!");
+    }
+
+    const newStartDateIso = new Date(dateInput.value).toISOString();
+
+    const { error } = await _supabase
+        .from('app_settings')
+        .upsert({ key: 'current_cylinder_start_date', value: newStartDateIso }, { onConflict: 'key' });
+
+    if (error) {
+        alert("Failed to update date: " + error.message);
+    } else {
+        alert("Cylinder start date successfully updated! All old data from this date will now be included.");
+        await initCylinderSettings();
+        fetchLogs();
+    }
+}
+
+// ==========================================
+// Mark Gas Finished & Start New Cylinder
+// ==========================================
+async function finishAndStartNewCylinder() {
+    if (!confirm("Are you sure the gas cylinder is completely finished?\nThis will lock current calculations and start a NEW cylinder cycle for upcoming cooking logs.")) {
+        return;
+    }
+
+    const newCylinderId = currentCylinderId + 1;
+    const newStartDate = new Date().toISOString();
+
+    await _supabase.from('app_settings').upsert({ key: 'current_cylinder_id', value: newCylinderId.toString() }, { onConflict: 'key' });
+    await _supabase.from('app_settings').upsert({ key: 'current_cylinder_start_date', value: newStartDate }, { onConflict: 'key' });
+
+    alert(`Success! Cylinder #${currentCylinderId} completed.\nNow starting Cylinder #${newCylinderId}. All new logs will accumulate for this new cylinder.`);
+
+    await initCylinderSettings();
+    fetchLogs();
+}
 
 // ==========================================
 // Fetch Master Cooking Logs
@@ -33,9 +134,9 @@ async function fetchLogs() {
     tbody.innerHTML = data.map(log => `
         <tr>
             <td><strong>${log.profiles?.full_name || 'N/A'}</strong></td>
-            <td>${log.burner_count || 1} Burner</td>
-            <td>${new Date(log.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-            <td>${log.end_time ? new Date(log.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '<span style="color:orange;">Running</span>'}</td>
+            <td>Burner ${log.burner_count || log.burner_index || 1}</td>
+            <td>${new Date(log.start_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
+            <td>${log.end_time ? new Date(log.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '<span style="color:orange;">Running</span>'}</td>
             <td><span class="badge">${log.duration_minutes || 0} mins</span></td>
             <td>
                 <button class="btn btn-primary" style="padding:4px 8px; font-size:0.8rem; margin-right:4px;" onclick="editLogDuration(${log.id}, ${log.duration_minutes || 0})">
@@ -50,7 +151,7 @@ async function fetchLogs() {
 }
 
 // ==========================================
-// Edit Cooking Log Duration (Admin Only)
+// Edit Cooking Log Duration
 // ==========================================
 async function editLogDuration(id, currentMins) {
     const newMinsInput = prompt(`Edit Cooking Duration (Minutes):\nCurrent: ${currentMins} mins`, currentMins);
@@ -76,12 +177,11 @@ async function editLogDuration(id, currentMins) {
     } else {
         alert('Updated successfully!');
         fetchLogs();
-        if (typeof refreshDashboard === 'function') refreshDashboard();
     }
 }
 
 // ==========================================
-// Delete Cooking Log Permanently
+// Delete Cooking Log
 // ==========================================
 async function removeLog(id) {
     if (confirm('Delete log permanently?')) {
@@ -90,13 +190,12 @@ async function removeLog(id) {
             alert('Failed to delete log: ' + error.message);
         } else {
             fetchLogs();
-            if (typeof refreshDashboard === 'function') refreshDashboard();
         }
     }
 }
 
 // ==========================================
-// Save Cylinder Bill & Run Dynamic Splitter
+// Save Cylinder Bill & Calculate Splitter
 // ==========================================
 async function runBillCalculation(e) {
     e.preventDefault();
@@ -109,77 +208,65 @@ async function runBillCalculation(e) {
         return;
     }
 
-    // ১. নতুন টাকা Supabase-এর app_settings টেবিলে আপডেট করবে
-    const { error: setErr } = await _supabase
+    await _supabase
         .from('app_settings')
         .upsert({ key: 'cylinder_cost', value: totalAmount.toString() }, { onConflict: 'key' });
 
-    if (setErr) {
-        console.error("Error updating settings:", setErr.message);
-        alert("Database update failed! Check permissions.");
-        return;
-    }
-
-    // ২. শুধুমাত্র চলতি মাসের রান্না সেশনের ডাটা ফেচ করবে
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-
+    // সক্রিয় সিলিন্ডার শুরুর তারিখ বা তার পর থেকে সমস্ত ডাটা তুলে আনবে
     const { data, error } = await _supabase
         .from('burner_sessions')
-        .select('start_time, weighted_hours, profiles(full_name)')
-        .eq('status', 'completed');
+        .select('start_time, duration_minutes, weighted_hours, profiles(full_name)')
+        .eq('status', 'completed')
+        .gte('start_time', currentCylinderStartDate);
 
     if (error) {
         alert("Failed to fetch sessions: " + error.message);
         return;
     }
 
+    let totalHouseMins = 0;
     let houseWeightedTotal = 0;
-    const totals = {};
+    const userMins = {};
+    const userWeighted = {};
 
     data?.forEach(row => {
-        const logDate = new Date(row.start_time);
-        
-        // চলতি মাসের ডাটা ফিল্টারিং
-        if (logDate.getMonth() === currentMonth && logDate.getFullYear() === currentYear) {
-            const val = parseFloat(row.weighted_hours || 0);
-            const name = row.profiles?.full_name || 'Unknown';
-            houseWeightedTotal += val;
-            totals[name] = (totals[name] || 0) + val;
-        }
+        const mins = parseInt(row.duration_minutes || 0);
+        const weighted = parseFloat(row.weighted_hours || (mins / 60));
+        const name = row.profiles?.full_name || 'Unknown User';
+
+        totalHouseMins += mins;
+        houseWeightedTotal += weighted;
+
+        userMins[name] = (userMins[name] || 0) + mins;
+        userWeighted[name] = (userWeighted[name] || 0) + weighted;
     });
 
     const tbody = document.getElementById('billResultsBody');
     const resultsContainer = document.getElementById('billResultsContainer');
     if (resultsContainer) resultsContainer.classList.remove('hidden');
 
-    if (houseWeightedTotal === 0 || Object.keys(totals).length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No completed logs for the current month yet.</td></tr>`;
-        alert(`Bill rate (${totalAmount} BDT) saved! But no usage logs were found for this month.`);
+    if (totalHouseMins === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No completed logs recorded for active Cylinder #${currentCylinderId} starting from ${new Date(currentCylinderStartDate).toLocaleDateString()}.</td></tr>`;
+        alert(`Bill rate (${totalAmount} BDT) saved!`);
         return;
     }
 
-    // ৩. UI-তে মেম্বারদের টাকার হিসেব দেখাবে
-    tbody.innerHTML = Object.keys(totals).map(name => {
-        const userVal = totals[name];
-        const ratio = ((userVal / houseWeightedTotal) * 100).toFixed(1);
-        const due = ((userVal / houseWeightedTotal) * totalAmount).toFixed(2);
+    tbody.innerHTML = Object.keys(userMins).map(name => {
+        const uMins = userMins[name];
+        const uWeighted = userWeighted[name];
+        const ratio = ((uMins / totalHouseMins) * 100).toFixed(1);
+        const due = ((uMins / totalHouseMins) * totalAmount).toFixed(2);
 
         return `
             <tr>
                 <td><strong>${name}</strong></td>
-                <td>${userVal.toFixed(2)} hrs</td>
+                <td>${uMins} Mins</td>
+                <td>${uWeighted.toFixed(2)} hrs</td>
                 <td>${ratio}%</td>
-                <td><strong style="color:var(--success);">${due} BDT</strong></td>
+                <td><strong style="color:var(--success, #16a34a);">${due} BDT</strong></td>
             </tr>
         `;
     }).join('');
 
-    alert(`Successfully updated gas bill to ${totalAmount} BDT! User dashboard updated.`);
-
-    // ড্যাশবোর্ড স্ক্রিন খোলা থাকলে তা অটো-রিফ্রেশ করবে
-    if (typeof refreshDashboard === 'function') {
-        refreshDashboard();
-    }
+    alert(`Bill updated (${totalAmount} BDT)!`);
 }

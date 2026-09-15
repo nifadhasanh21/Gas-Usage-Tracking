@@ -3,6 +3,10 @@ let currentRole = 'user';
 let processedReportData = []; // PDF Export Cache
 let activeTimers = {}; // Local active timer intervals
 
+// Current Active Cylinder State
+let activeCylinderId = 1;
+let activeCylinderStartDate = '1970-01-01T00:00:00.000Z';
+
 // Initialize App on DOM Load
 document.addEventListener('DOMContentLoaded', async () => {
     await checkUserRole();
@@ -20,9 +24,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('downloadPdfBtn')?.addEventListener('click', generateCleanPDFReport);
 });
 
-// ==========================================
-// Service Worker Registration for PWA
-// ==========================================
 async function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
         try {
@@ -33,9 +34,6 @@ async function registerServiceWorker() {
     }
 }
 
-// ==========================================
-// User Authentication & Role Management
-// ==========================================
 async function checkUserRole() {
     const { data: { user } } = await _supabase.auth.getUser();
     if (user) {
@@ -44,9 +42,6 @@ async function checkUserRole() {
     }
 }
 
-// ==========================================
-// PWA & Cross-Browser Notification System
-// ==========================================
 async function requestNotificationPermission() {
     if ('Notification' in window && Notification.permission === 'default') {
         await Notification.requestPermission();
@@ -54,9 +49,7 @@ async function requestNotificationPermission() {
 }
 
 async function sendGasNotification(title, body) {
-    if (!('Notification' in window) || Notification.permission !== 'granted') {
-        return;
-    }
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
     const notificationOptions = {
         body: body,
@@ -67,44 +60,21 @@ async function sendGasNotification(title, body) {
         renotify: true
     };
 
-    // Priority 1: Service Worker Message (Cross-Browser & Mobile Support)
     if ('serviceWorker' in navigator) {
         try {
             const reg = await navigator.serviceWorker.ready;
             if (reg.active) {
-                reg.active.postMessage({
-                    type: 'SHOW_NOTIFICATION',
-                    title: title,
-                    options: notificationOptions
-                });
+                reg.active.postMessage({ type: 'SHOW_NOTIFICATION', title: title, options: notificationOptions });
                 return;
             }
-        } catch (err) {
-            console.log('SW postMessage failed, falling back to showNotification:', err);
-        }
-
-        try {
-            const reg = await navigator.serviceWorker.ready;
-            if (reg && reg.showNotification) {
-                await reg.showNotification(title, notificationOptions);
-                return;
-            }
-        } catch (err) {
-            console.log('Service Worker notification fallback failed:', err);
-        }
+        } catch (err) {}
     }
 
-    // Priority 2: Standard Desktop / In-Tab Notification Fallback
     try {
         new Notification(title, notificationOptions);
-    } catch (e) {
-        console.log('Standard Notification error:', e);
-    }
+    } catch (e) {}
 }
 
-// ==========================================
-// Realtime Database Subscription
-// ==========================================
 function setupRealtimeSync() {
     _supabase
         .channel('realtime-burner-changes')
@@ -113,19 +83,12 @@ function setupRealtimeSync() {
             { event: '*', schema: 'public', table: 'burner_sessions' },
             (payload) => {
                 refreshDashboard();
-
                 if (payload.eventType === 'INSERT') {
                     const burnerNum = payload.new.burner_count || payload.new.burner_index || 1;
-                    sendGasNotification(
-                        '🔥 Stove Turned ON!',
-                        `New cooking session started on Burner ${burnerNum}.`
-                    );
+                    sendGasNotification('🔥 Stove Turned ON!', `New cooking session started on Burner ${burnerNum}.`);
                 } 
                 else if (payload.eventType === 'UPDATE' && payload.new.status === 'completed') {
-                    sendGasNotification(
-                        '✅ Stove Turned OFF!',
-                        `Cooking session completed (${payload.new.duration_minutes || 0} mins).`
-                    );
+                    sendGasNotification('✅ Stove Turned OFF!', `Cooking session completed (${payload.new.duration_minutes || 0} mins).`);
                 }
             }
         )
@@ -139,9 +102,6 @@ function setupRealtimeSync() {
         .subscribe();
 }
 
-// ==========================================
-// Dashboard Logic & Data Fetching
-// ==========================================
 function refreshDashboard() {
     fetchLiveStatusAndQueue();
     fetchDateWiseUsageAndCost();
@@ -154,20 +114,17 @@ async function fetchLiveStatusAndQueue() {
 
     const { data: { user } } = await _supabase.auth.getUser();
 
-    // Get running sessions
     const { data: activeSessions } = await _supabase
         .from('burner_sessions')
         .select('*, profiles(full_name)')
         .eq('status', 'running');
 
-    // Clear old active timers
     Object.keys(activeTimers).forEach(id => clearInterval(activeTimers[id]));
     activeTimers = {};
 
     let b1Session = activeSessions?.find(s => (s.burner_count || s.burner_index) === 1);
     let b2Session = activeSessions?.find(s => (s.burner_count || s.burner_index) === 2);
 
-    // Render Dual Burner Control Cards
     if (grid) {
         grid.style.display = 'grid';
         grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(280px, 1fr))';
@@ -206,7 +163,6 @@ async function fetchLiveStatusAndQueue() {
             `;
         }).join('');
 
-        // Live Timers Setup
         activeSessions?.forEach(s => {
             const bIndex = s.burner_count || s.burner_index || 1;
             const timerElem = document.getElementById(`timer_b${bIndex}`);
@@ -246,7 +202,6 @@ async function fetchLiveStatusAndQueue() {
     }
 }
 
-// Start Cooking Action
 async function startCookingSession(burnerIndex) {
     const { data: { user } } = await _supabase.auth.getUser();
     if (!user) return alert('Please login first!');
@@ -279,7 +234,6 @@ async function startCookingSession(burnerIndex) {
     }
 }
 
-// Stop Cooking Action
 async function stopCookingSession(sessionId, burnerIndex, startTimeIso) {
     const btn = document.getElementById(`btn_stop_b${burnerIndex}`);
     if (btn) {
@@ -310,7 +264,6 @@ async function stopCookingSession(sessionId, burnerIndex, startTimeIso) {
     }
 }
 
-// Emergency Force Stop (Updated to prompt custom minutes)
 async function emergencyForceStop(sessionId) {
     if (!confirm('Are you sure you want to force shut down this active burner session?')) return;
     
@@ -320,7 +273,7 @@ async function emergencyForceStop(sessionId) {
     
     let durationMinutes = Math.max(1, Math.round((endTime - startTime) / (1000 * 60)));
 
-    const inputMins = prompt(`Actual time elapsed: ${durationMinutes} mins.\nEnter corrected minutes for log (or click OK to keep as is):`, durationMinutes);
+    const inputMins = prompt(`Actual time elapsed: ${durationMinutes} mins.\nEnter corrected minutes for log:`, durationMinutes);
     if (inputMins !== null && !isNaN(parseInt(inputMins, 10))) {
         durationMinutes = Math.max(0, parseInt(inputMins, 10));
     }
@@ -341,25 +294,28 @@ async function joinQueue(userId) {
     alert('You have joined the queue!');
 }
 
+// ==========================================
+// Usage Display & Active Cylinder Cost Calculation
+// ==========================================
 async function fetchDateWiseUsageAndCost() {
     const container = document.getElementById('dateWiseTablesContainer');
     if (!container) return;
 
+    // Load app settings
     const { data: setRes } = await _supabase.from('app_settings').select('key, value');
-    let cylinderCost = 1450;
+    let cylinderCost = 1650;
     let cylinderCapHours = 80;
 
     if (setRes) {
         setRes.forEach(s => {
             if (s.key === 'cylinder_cost' && s.value) cylinderCost = parseFloat(s.value);
             if (s.key === 'cylinder_capacity_hours' && s.value) cylinderCapHours = parseFloat(s.value);
+            if (s.key === 'current_cylinder_id' && s.value) activeCylinderId = parseInt(s.value);
+            if (s.key === 'current_cylinder_start_date' && s.value) activeCylinderStartDate = s.value;
         });
     }
 
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-
+    // ALL completed logs fetch (no data is ever deleted)
     const { data } = await _supabase
         .from('burner_sessions')
         .select('*, profiles(full_name)')
@@ -367,32 +323,35 @@ async function fetchDateWiseUsageAndCost() {
         .order('start_time', { ascending: false });
 
     if (!data || data.length === 0) {
-        container.innerHTML = `<p class="subtitle text-center">No logs found.</p>`;
+        container.innerHTML = `<p class="subtitle text-center">No cooking logs found.</p>`;
         return;
     }
 
     const grouped = {};
-    let grandTotalMins = 0;
-    let totalWeightedHours = 0;
-    let userOverallMins = {};
+    let activeCylinderTotalMins = 0;
+    let activeCylinderTotalWeightedHours = 0;
+    let userActiveCylinderMins = {};
     let chartLabels = [];
     let chartData = [];
     processedReportData = [];
 
+    const activeCycleStart = new Date(activeCylinderStartDate).getTime();
+
     data.forEach(row => {
         const logDate = new Date(row.start_time);
         const dateStr = logDate.toLocaleDateString();
-        
+        const mins = parseInt(row.duration_minutes || 0);
+        const name = row.profiles?.full_name || 'User';
+
         if (!grouped[dateStr]) grouped[dateStr] = [];
         grouped[dateStr].push(row);
 
-        if (logDate.getMonth() === currentMonth && logDate.getFullYear() === currentYear) {
-            const mins = parseInt(row.duration_minutes || 0);
-            const name = row.profiles?.full_name || 'User';
-
-            if (!userOverallMins[name]) userOverallMins[name] = 0;
-            userOverallMins[name] += mins;
-            grandTotalMins += mins;
+        // Filter calculation based on ACTIVE CYLINDER START DATE (Cross-Month Support)
+        if (logDate.getTime() >= activeCycleStart) {
+            if (!userActiveCylinderMins[name]) userActiveCylinderMins[name] = 0;
+            userActiveCylinderMins[name] += mins;
+            activeCylinderTotalMins += mins;
+            activeCylinderTotalWeightedHours += parseFloat(row.weighted_hours || (mins / 60));
         }
     });
 
@@ -425,7 +384,6 @@ async function fetchDateWiseUsageAndCost() {
             const burnerNum = item.burner_count || item.burner_index || 1;
 
             dayMins += mins;
-            totalWeightedHours += parseFloat(item.weighted_hours || (mins / 60));
 
             processedReportData.push({
                 date: dateStr,
@@ -462,8 +420,8 @@ async function fetchDateWiseUsageAndCost() {
         chartData.unshift(dayMins);
     }
 
-    // Cylinder Percentage calculation
-    const usedPct = Math.min(100, (totalWeightedHours / cylinderCapHours) * 100);
+    // Cylinder Health Calculation
+    const usedPct = Math.min(100, (activeCylinderTotalWeightedHours / cylinderCapHours) * 100);
     const remainingPct = Math.max(0, 100 - usedPct).toFixed(1);
     
     const pctTextElem = document.getElementById('cylinderPctText');
@@ -471,23 +429,24 @@ async function fetchDateWiseUsageAndCost() {
     if (pctTextElem) pctTextElem.innerText = `${remainingPct}%`;
     if (barElem) barElem.style.width = `${remainingPct}%`;
 
-    // Bill Splitter Calculation
+    // Active Cylinder Bill Splitter Output
     let costBreakdownHtml = '';
-    if (Object.keys(userOverallMins).length === 0) {
-        costBreakdownHtml = `<p>No cooking logs for the current month yet.</p>`;
+    if (Object.keys(userActiveCylinderMins).length === 0) {
+        costBreakdownHtml = `<p>No cooking logs recorded for active Cylinder #${activeCylinderId} yet.</p>`;
     } else {
-        costBreakdownHtml = Object.keys(userOverallMins).map(name => {
-            const userMins = userOverallMins[name];
-            const percentage = grandTotalMins > 0 ? (userMins / grandTotalMins) : 0;
+        costBreakdownHtml = Object.keys(userActiveCylinderMins).map(name => {
+            const userMins = userActiveCylinderMins[name];
+            const percentage = activeCylinderTotalMins > 0 ? (userMins / activeCylinderTotalMins) : 0;
             const userCost = (percentage * cylinderCost).toFixed(2);
-            return `<p style="margin-bottom: 6px;"><strong>${name}</strong>: ${userMins} Mins ➔ Estimated Bill: <strong>${userCost} BDT</strong></p>`;
+            return `<p style="margin-bottom: 6px;"><strong>${name}</strong>: ${userMins} Mins (${(percentage * 100).toFixed(1)}%) ➔ Estimated Share: <strong>${userCost} BDT</strong></p>`;
         }).join('');
     }
 
     html += `
         <div class="grand-total-box" style="background:#f8fafc; padding:15px; border-radius:10px; border:1px solid #e2e8f0; margin-top:20px;">
-            <h4 style="margin-top:0;">Current Month Bill Splitter (Cylinder: ${cylinderCost} BDT)</h4>
-            <p class="mb-2">Current Month Total Gas Use: <strong>${grandTotalMins} Minutes</strong></p>
+            <h4 style="margin-top:0; color:#1e3a8a;">Active Cylinder #${activeCylinderId} Bill Splitter (Price: ${cylinderCost} BDT)</h4>
+            <p style="font-size:0.85rem; color:#64748b; margin-bottom:8px;">Cycle Started: ${new Date(activeCylinderStartDate).toLocaleString()}</p>
+            <p class="mb-2">Active Cylinder Total Gas Usage: <strong>${activeCylinderTotalMins} Minutes</strong></p>
             <div>${costBreakdownHtml}</div>
         </div>
     `;
@@ -496,40 +455,24 @@ async function fetchDateWiseUsageAndCost() {
     renderAnalyticsChart(chartLabels.slice(-7), chartData.slice(-7));
 }
 
-// ==========================================
-// Admin Feature: Edit Cooking Duration (Minutes)
-// ==========================================
 async function editSessionDuration(sessionId, currentMins) {
-    if (currentRole !== 'admin') {
-        return alert('Only admins can edit usage duration.');
-    }
+    if (currentRole !== 'admin') return alert('Only admins can edit usage duration.');
 
     const newMinsInput = prompt(`Edit Cooking Duration (Minutes):\nCurrent: ${currentMins} mins`, currentMins);
-
-    if (newMinsInput === null) return; // Prompt closed
+    if (newMinsInput === null) return;
 
     const newMins = parseInt(newMinsInput, 10);
-
-    if (isNaN(newMins) || newMins < 0) {
-        return alert('Please enter a valid positive number of minutes.');
-    }
+    if (isNaN(newMins) || newMins < 0) return alert('Please enter a valid positive number.');
 
     const newWeightedHours = parseFloat((newMins / 60).toFixed(4));
 
     const { error } = await _supabase
         .from('burner_sessions')
-        .update({
-            duration_minutes: newMins,
-            weighted_hours: newWeightedHours
-        })
+        .update({ duration_minutes: newMins, weighted_hours: newWeightedHours })
         .eq('id', sessionId);
 
-    if (error) {
-        alert('Failed to update duration: ' + error.message);
-    } else {
-        alert('Duration updated successfully!');
-        refreshDashboard();
-    }
+    if (error) alert('Failed to update: ' + error.message);
+    else refreshDashboard();
 }
 
 async function deleteSessionLog(sessionId) {
@@ -544,7 +487,6 @@ async function deleteSessionLog(sessionId) {
 function renderAnalyticsChart(labels, data) {
     const ctx = document.getElementById('usageChart');
     if (!ctx) return;
-
     if (chartInstance) chartInstance.destroy();
 
     chartInstance = new Chart(ctx, {
@@ -566,7 +508,6 @@ function renderAnalyticsChart(labels, data) {
     });
 }
 
-// Clean Styled PDF Generation
 function generateCleanPDFReport() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -593,7 +534,7 @@ function generateCleanPDFReport() {
     const finalY = doc.lastAutoTable.finalY + 15;
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    doc.text("Monthly Gas Bill Breakdown", 14, finalY);
+    doc.text(`Active Cylinder #${activeCylinderId} Breakdown`, 14, finalY);
 
     const logsContainer = document.querySelector('.grand-total-box');
     if (logsContainer) {
