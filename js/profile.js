@@ -34,25 +34,34 @@ async function loadUserProfileAndStats() {
         document.getElementById('userRoleBadge').innerHTML = `<span class="burner-badge badge-busy" style="padding: 4px 12px; font-size: 0.75rem;">ADMIN</span>`;
     }
 
-    // 3. Fetch App Settings for Cylinder Cost Calculations
+    // 3. Fetch App Settings for Active Cylinder
     const { data: setRes } = await _supabase.from('app_settings').select('key, value');
     let cylinderCost = 1450;
+    let currentCylinderStartDate = null;
 
     setRes?.forEach(s => {
-        if (s.key === 'cylinder_cost') cylinderCost = parseFloat(s.value);
+        if (s.key === 'cylinder_cost') cylinderCost = parseFloat(s.value || 1450);
+        if (s.key === 'current_cylinder_start_date') currentCylinderStartDate = s.value;
     });
 
-    // 4. Fetch All Sessions for Ratio-based Cost Calculation
-    const { data: allSessions } = await _supabase
+    // Build Query to fetch active cylinder sessions only
+    let query = _supabase
         .from('burner_sessions')
         .select('*')
         .eq('status', 'completed');
+
+    // If active cylinder start date exists, filter sessions from that date onwards
+    if (currentCylinderStartDate) {
+        query = query.gte('start_time', currentCylinderStartDate);
+    }
+
+    const { data: activeSessions } = await query;
 
     let grandTotalMins = 0;
     let myTotalMins = 0;
     let mySessions = [];
 
-    allSessions?.forEach(s => {
+    activeSessions?.forEach(s => {
         const duration = parseInt(s.duration_minutes || 0);
         grandTotalMins += duration;
 
@@ -62,17 +71,19 @@ async function loadUserProfileAndStats() {
         }
     });
 
-    // Calculate Personal Estimated Cost
+    // Calculate Personal Estimated Cost based on active cylinder
     const myCostPercentage = grandTotalMins > 0 ? (myTotalMins / grandTotalMins) : 0;
     const myEstimatedCost = (myCostPercentage * cylinderCost).toFixed(2);
 
     document.getElementById('totalUserMins').innerText = `${myTotalMins} Mins`;
     document.getElementById('totalUserCost').innerText = `${myEstimatedCost} BDT`;
 
-    // 5. Render History Table
+    // 5. Render History Table (Active Cylinder Sessions)
     const tbody = document.getElementById('myHistoryTableBody');
+    if (!tbody) return;
+
     if (mySessions.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center">No cooking history found yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center">No cooking history found for current cylinder cycle.</td></tr>`;
         return;
     }
 
@@ -82,7 +93,7 @@ async function loadUserProfileAndStats() {
             <tr>
                 <td><strong>${dateStr}</strong></td>
                 <td>${s.meal_note || 'General Cooking'}</td>
-                <td>${s.burner_count} Burner(s)</td>
+                <td>${s.burner_count || s.burner_index || 1} Burner(s)</td>
                 <td>${parseInt(s.duration_minutes || 0)} mins</td>
             </tr>
         `;
